@@ -5,23 +5,33 @@ from typing import Any
 
 import h5py
 import numpy as np
+import json
 
 from .trajectory import Trajectory
 
 
 class HDF5TrajectoryWriter:
-    def __init__(self, path: str | Path, compression: str = "gzip", level: int = 4) -> None:
+    def __init__(
+            self, 
+            path: str | Path, 
+            compression: str = "gzip", 
+            level: int = 4,
+            metadata: dict[str, object] | None = None,
+    ) -> None:
         self.path = Path(path)
         self.compression = None if compression == "none" else compression
         self.level = level
+        self.metadata = metadata or {}
         self._file: h5py.File | None = None
 
     def __enter__(self) -> "HDF5TrajectoryWriter":
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._file = h5py.File(self.path, "w")
-        self._file.attrs["format_version"] = "1.0"
+
+        self._file.attrs["format_version"] = "1.1"
         self._file.attrs["quaternion_order"] = "xyzw"
         self._file.attrs["contact_mode"] = "0=free,1=sticking,2=sliding"
+        self._file.attrs["metadata_json"] = json.dumps(self.metadata)
         return self
 
     def __exit__(self, *args: Any) -> None:

@@ -24,6 +24,7 @@ python -m pip install -e ".[dev]"
 
 ## Run
 
+### Simulate
 ```bash
 ball_simulator validate-config configs/poc.yaml
 ball_simulator generate configs/poc.yaml --output trajectories.h5
@@ -31,6 +32,26 @@ pytest -q
 ```
 
 For a fast smoke test, change `trajectories` to 2 and `duration` to 0.2 in a copy of the YAML file.
+
+### Analyze
+#### Display the initial condition coverage
+```bash
+ball_simulator plot-initial-conditions trajectories.h5 --output initial_conditions.png --no-show
+```
+
+For larger datasets the number of intial conditions van be limited with the `--max-points` flag.
+
+#### List trajectory IDs
+```bash
+ball_simulator list-trajectories trajectories.h5
+```
+
+#### Plot trajectory 17
+```bash
+ball_simulator plot-trajectory trajectories.h5 17 --output trajectory_17.png --diagnostics-output trajectory_17_diagnostics.png --no-show
+```
+
+Use high-rate samples by adding the `--high-rate` flag.
 
 ## HDF5 layout
 

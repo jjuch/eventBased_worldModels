@@ -21,7 +21,12 @@ class DatasetGenerator:
     def generate(self, output: str | Path | None = None) -> Path:
         path = Path(output or self.config.dataset.output)
         d = self.config.dataset
-        with HDF5TrajectoryWriter(path, d.compression, d.compression_level) as writer:
+        with HDF5TrajectoryWriter(
+            path, 
+            d.compression, 
+            d.compression_level,
+            metadata=self.config.model_dump(mode="json"),
+            ) as writer:
             for i in trange(d.trajectories, desc="Generating trajectories"):
                 params = self.sampler.sample_parameters()
                 initial = self.sampler.sample_initial_state(params)
