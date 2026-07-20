@@ -5,6 +5,9 @@ matplotlib.use("Agg")
 import h5py
 import numpy as np
 
+import os
+import tempfile
+
 from ball_simulator.visualization import (
     load_initial_conditions,
     load_trajectory,
@@ -29,9 +32,7 @@ def test_load_trajectory_accepts_short_id(smoke_dataset):
     assert trajectory.linear_velocity.shape == trajectory.position.shape
 
 
-def test_visualizations_can_be_saved(
-    smoke_dataset,
-    tmp_path,
+def test_visualizations_can_be_saved(smoke_dataset, tmp_path
 ):
     initial_data = load_initial_conditions(smoke_dataset)
     trajectory = load_trajectory(smoke_dataset, 0)
