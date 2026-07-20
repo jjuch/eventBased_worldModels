@@ -1,22 +1,22 @@
 physics:
-  mass: {low: 0.10, high: 0.50, scale: linear}
-  radius: {low: 0.04, high: 0.08, scale: linear}
-  normal_stiffness: {low: 50000.0, high: 500000.0, scale: log}
-  normal_damping: {low: 0.05, high: 0.80, scale: linear}
-  tangential_stiffness_ratio: {low: 0.15, high: 0.50, scale: linear}
-  tangential_damping_ratio: {low: 0.05, high: 0.50, scale: linear}
-  friction: {low: 0.10, high: 1.00, scale: linear}
+  mass: {low: 0.15, high: 0.25, scale: linear}
+  radius: {low: 0.04, high: 0.06, scale: linear}
+  normal_stiffness: {low: 80000.0, high: 250000.0, scale: log}
+  normal_damping: {low: 0.10, high: 0.50, scale: linear}
+  tangential_stiffness_ratio: {low: 0.20, high: 0.40, scale: linear}
+  tangential_damping_ratio: {low: 0.10, high: 0.30, scale: linear}
+  friction: {low: 0.20, high: 0.80, scale: linear}
   drag_coefficient: {low: 0.0, high: 0.0, scale: linear}
   air_density: 1.225
   magnus_coefficient: {low: 0.0, high: 0.0, scale: linear}
   rotational_drag: {low: 0.0, high: 0.0, scale: linear}
 initial_state:
-  wall_gap: {low: 0.15, high: 1.00, scale: linear}
-  wall_normal_speed: {low: 1.0, high: 8.0, scale: linear}
-  tangential_speed: {low: -4.0, high: 4.0, scale: linear}
-  vertical_position: {low: 0.5, high: 2.0, scale: linear}
+  wall_gap: {low: 0.30, high: 1.20, scale: linear}
+  wall_normal_speed: {low: 1.0, high: 5.0, scale: linear}
+  tangential_speed: {low: -1.5, high: 1.5, scale: linear}
+  vertical_position: {low: 0.3, high: 1.50, scale: linear}
   lateral_position: {low: -0.5, high: 0.5, scale: linear}
-  spin: {low: -150.0, high: 150.0, scale: linear}
+  spin: {low: -60.0, high: 60.0, scale: linear}
 simulation:
   duration: 1.0
   internal_dt: 0.00002

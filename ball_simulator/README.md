@@ -53,6 +53,15 @@ ball_simulator plot-trajectory trajectories.h5 17 --output trajectory_17.png --d
 
 Use high-rate samples by adding the `--high-rate` flag.
 
+#### Stratified inspection
+Inspect several regimes to verify the generated trajectories.
+```bash
+ball_simulator inspect-regimes trajectories.h5 -o validation/regimes
+ball_simulator inspect-regimes trajectories.h5 -o validation/regimes --high-rate
+ball_simulator inspect-regimes trajectories.h5 -o validation/regimes --no-diagnostics
+```
+The output directory contains `manifest.csv`, one 3D plot per selected regime, and optional physics-diagnostic plots. The selector uses dataset-relative deciles, so it continues to work when YAML ranges change. It reads only the fields needed for selection and only loads full trajectories after selection.
+
 ## HDF5 layout
 
 ```text

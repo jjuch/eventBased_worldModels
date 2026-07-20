@@ -16,6 +16,7 @@ from .visualization import (
     plot_trajectory_3d,
     plot_trajectory_diagnostics,
 )
+from .regime_inspection import render_stratified_inspection
 
 
 app = typer.Typer(help="Generate physically rich sphere-wall trajectories.")
@@ -245,3 +246,47 @@ def plot_trajectory_command(
             f"{diagnostics_output.resolve()}"
         )
 
+
+@app.command("inspect-regimes")
+def inspect_regimes_command(
+    dataset: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True),
+    ],
+    output_directory: Annotated[
+        Path,
+        typer.Option("--output-directory", "-o", help="Directory for plots and manifest."),
+    ] = Path("regime_inspection"),
+    diagnostics: Annotated[
+        bool,
+        typer.Option("--diagnostics/--no-diagnostics"),
+    ] = True,
+    high_rate: Annotated[
+        bool,
+        typer.Option("--high-rate", help="Use high-rate samples when available."),
+    ] = False,
+    allow_reuse: Annotated[
+        bool,
+        typer.Option(
+            "--allow-reuse",
+            help="Permit one trajectory to represent multiple regimes.",
+        ),
+    ] = False,
+    wall_x: Annotated[
+        float,
+        typer.Option("--wall-x", help="Wall-plane x coordinate."),
+    ] = 0.0,
+) -> None:
+    """Select and render representative physical regimes."""
+    selected = render_stratified_inspection(
+        dataset,
+        output_directory, 
+        include_diagnostics=diagnostics,
+        use_high_rate=high_rate,
+        allow_reuse=allow_reuse,
+        wall_x=wall_x
+    )
+    print(f"[green]Rendered {len(selected)} physical regimes:[/green]")
+    for item in selected:
+        print(f"  [bold]{item.regime:22s}[/bold] {item.trajectory_id} — {item.reason}")
+    print(f"[green]Output:[/green] {output_directory.resolve()}")
