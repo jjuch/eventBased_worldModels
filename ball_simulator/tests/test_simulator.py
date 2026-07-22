@@ -2,7 +2,7 @@ import numpy as np
 
 from ball_simulator.config import SimulationConfig
 from ball_simulator.models import RigidBodyState, SphereParameters
-from ball_simulator.simulator import BallSimulator
+from ball_simulator.simulator import BallSimulator, SimulationContext
 from ball_simulator.environments import EnvironmentFactory, EnvironmentKind, ExperimentConfig
 
 
@@ -96,4 +96,110 @@ def test_ball_bounces_on_u_box_floor():
         trajectory.observations[
             "contact_active"
         ][:, floor_index]
+    )
+
+
+def test_ball_contacts_left_wall():
+    cfg = SimulationConfig(duration=1.0, internal_dt=1e-4, observation_dt=0.005,
+                           gravity=(0.0, 0.0, -9.81))
+    exp_cfg = ExperimentConfig(default_environment='u-box')
+    environment = EnvironmentFactory.create(
+        EnvironmentKind.U_BOX,
+        exp_cfg,
+    )
+
+    simulator = BallSimulator(
+        cfg,
+        environment,
+    )
+
+    initial = RigidBodyState(
+        position=np.array([0.4, 0.0, 1.0]),
+        quaternion_xyzw=np.array(
+            [0.0, 0.0, 0.0, 1.0]
+        ),
+        linear_velocity=np.array(
+            [-2.0, 0.0, 0.0]
+        ),
+        angular_velocity=np.zeros(3),
+    )
+
+    trajectory = simulator.simulate(
+        initial,
+        params(),
+    )
+
+    left_index = trajectory.surface_ids.index(
+        "left_wall"
+    )
+
+    assert np.any(
+        trajectory.observations[
+            "contact_active"
+        ][:, left_index]
+    )
+
+
+def test_ball_contacts_right_wall():
+    cfg = SimulationConfig(duration=1.0, internal_dt=1e-4, observation_dt=0.005,
+                           gravity=(0.0, 0.0, -9.81))
+    exp_cfg = ExperimentConfig(default_environment='u-box')
+    environment = EnvironmentFactory.create(
+        EnvironmentKind.U_BOX,
+        exp_cfg,
+    )
+
+    simulator = BallSimulator(
+        cfg,
+        environment,
+    )
+    
+    initial = RigidBodyState(
+        position=np.array([1.6, 0.0, 1.0]),
+        quaternion_xyzw=np.array(
+            [0.0, 0.0, 0.0, 1.0]
+        ),
+        linear_velocity=np.array(
+            [2.0, 0.0, 0.0]
+        ),
+        angular_velocity=np.zeros(3),
+    )
+
+    trajectory = simulator.simulate(
+        initial,
+        params(),
+    )
+
+    left_index = trajectory.surface_ids.index(
+        "right_wall"
+    )
+
+    assert np.any(
+        trajectory.observations[
+            "contact_active"
+        ][:, left_index]
+    )
+
+
+def test_surface_contact_memories_are_independent():
+    context = SimulationContext.for_surface_ids(
+        ("left_wall", "right_wall", "floor")
+    )
+
+    context.contact_state(
+        "floor"
+    ).tangential_memory[:] = [1.0, 2.0, 3.0]
+
+    assert np.allclose(
+        context.contact_state(
+            "left_wall"
+        ).tangential_memory,
+        0.0,
+    )
+
+    assert np.allclose(
+        context.contact_state(
+            "right_wall"
+        ).tangential_memory,
+        0.0,
     )
