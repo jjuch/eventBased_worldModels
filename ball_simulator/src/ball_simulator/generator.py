@@ -6,30 +6,64 @@ import numpy as np
 from tqdm import trange
 
 from .config import ExperimentConfig
-from .sampling import ParameterSampler
-from .simulator import SphereWallSimulator
+from .environments import EnvironmentFactory, EnvironmentKind
+from .sampling import InitialStateSamplerFactory, ParameterSampler
+from .simulator import BallSimulator
 from .storage import HDF5TrajectoryWriter
 
 
 class DatasetGenerator:
-    def __init__(self, config: ExperimentConfig) -> None:
+    def __init__(
+        self, 
+        config: ExperimentConfig,
+        environment_kind: EnvironmentKind | None = None,
+    ) -> None:
         self.config = config
+        self.environment_kind = (
+            environment_kind or EnvironmentKind(config.default_environment)
+        )
         self.rng = np.random.default_rng(config.dataset.seed)
-        self.sampler = ParameterSampler(config, self.rng)
-        self.simulator = SphereWallSimulator(config.simulation)
+        self.environment = EnvironmentFactory.create(
+            self.environment_kind,
+            config,
+        )
+        self.parameter_sampler = ParameterSampler(config, self.rng)
+        self.initial_state_sampler = (
+            InitialStateSamplerFactory.create(
+                config, self.environment, self.rng,
+            )
+        )
+        self.simulator = BallSimulator(config.simulation, self.environment)
+
 
     def generate(self, output: str | Path | None = None) -> Path:
         path = Path(output or self.config.dataset.output)
-        d = self.config.dataset
+
+        dataset_config = self.config.dataset
+        metadata = self.config.model_dump(mode="json")
+        metadata["selected_environment"] = self.environment_kind.value
+        metadata["environment_geometry"] = self.environment.metadata()
+
         with HDF5TrajectoryWriter(
             path, 
-            d.compression, 
-            d.compression_level,
-            metadata=self.config.model_dump(mode="json"),
-            ) as writer:
-            for i in trange(d.trajectories, desc="Generating trajectories"):
-                params = self.sampler.sample_parameters()
-                initial = self.sampler.sample_initial_state(params)
-                trajectory = self.simulator.simulate(initial, params, d.store_high_rate)
+            dataset_config.compression, 
+            dataset_config.compression_level,
+            metadata=metadata,
+        ) as writer:
+            for i in trange(
+                dataset_config.trajectories,
+                desc=(
+                    "Generating "
+                    f"{self.environment_kind.value} " 
+                    "trajectories"
+                )
+            ):
+                params = self.parameter_sampler.sample_parameters()
+                initial_state = self.initial_state_sampler.sample(params)
+                trajectory = self.simulator.simulate(
+                    initial_state=initial_state,
+                    params=params,
+                    store_high_rate=dataset_config.store_high_rate,
+                )
                 writer.write(i, trajectory)
         return path

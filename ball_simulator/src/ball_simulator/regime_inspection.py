@@ -16,6 +16,7 @@ from .visualization import (
     plot_trajectory_3d,
     plot_trajectory_diagnostics
 )
+from .physics import ContactMode
 
 FloatArray = NDArray[np.float64]
 
@@ -80,7 +81,22 @@ def summarize_dataset(dataset: str | Path) -> list[TrajectorySummary]:
             incidence_cosine = normal_speed / max(speed, np.finfo(float).eps)
 
             active = np.asarray(obs["contact_active"][:], dtype=bool)
+            if active.ndim == 1:
+                active = active[:, None]
+            any_active = np.any(active, axis=1)
+            contact_episodes = _contact_episode_count(any_active)
+
             modes = np.asarray(obs["contact_mode"][:], dtype=np.int8)
+            if modes.ndim == 1:
+                modes = modes[:, None]
+            
+            has_sticking = bool(
+                np.any(modes == ContactMode.STICKING)
+            )
+            has_sliding = bool(
+                np.any(modes == ContactMode.SLIDING)
+            )
+
             penetration = np.asarray(obs["penetration"][:], dtype=float)
             normal_force = np.asarray(obs["normal_force"][:], dtype=float)
 
@@ -97,9 +113,9 @@ def summarize_dataset(dataset: str | Path) -> list[TrajectorySummary]:
                     normal_damping=_attr(attrs, "normal_damping"),
                     mass=_attr(attrs, "mass"),
                     radius=_attr(attrs, "radius"),
-                    contact_episodes=_contact_episode_count(active),
-                    has_sticking=bool(np.any(modes == 1)),
-                    has_sliding=bool(np.any(modes == 2)),
+                    contact_episodes=contact_episodes,
+                    has_sticking=has_sticking,
+                    has_sliding=has_sliding,
                     maximum_penetration=float(np.max(penetration, initial=0.0)),
                     peak_normal_force=float(
                         np.max(np.linalg.norm(normal_force, axis=1), initial=0.0)

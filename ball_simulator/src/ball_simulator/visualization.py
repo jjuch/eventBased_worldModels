@@ -7,6 +7,7 @@ from typing import Iterable, Sequence
 import h5py
 import matplotlib.pyplot as plt
 import numpy as np
+import json
 from matplotlib import colors
 from matplotlib.collections import LineCollection
 from matplotlib.figure import Figure
@@ -277,6 +278,22 @@ def load_trajectory(
         ),
         parameters=parameters,
     )
+
+
+def load_environment_metadata(
+    path: str | Path,
+) -> dict[str, object]:
+    with h5py.File(path, "r") as handle:
+        if "metadata_json" not in handle.attrs:
+            raise ImportError("File is corrupt: no metadata found.")
+        
+        metadata = json.loads(handle.attrs["metadata_json"])
+
+    if "environment_geometry" in metadata:
+        return metadata["environment_geometry"]
+    else:
+        raise ImportError("File is corrupt: no environment geometry found.")
+
 
 
 def robust_limits(

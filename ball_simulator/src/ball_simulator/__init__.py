@@ -4,6 +4,6 @@ Imports are intentionally lightweight so the mechanics can be tested without loa
 optional storage backends. Import DatasetGenerator from ball_simulator.generator.
 """
 from .config import ExperimentConfig
-from .simulator import SphereWallSimulator
+from .simulator import BallSimulator
 
-__all__ = ["ExperimentConfig", "SphereWallSimulator"]
+__all__ = ["ExperimentConfig", "BallSimulator"]

@@ -8,6 +8,7 @@ from rich import print
 
 from .config import ExperimentConfig
 from .generator import DatasetGenerator
+from .environments import EnvironmentKind
 from .visualization import (
     list_trajectory_ids,
     load_initial_conditions,
@@ -23,10 +24,49 @@ app = typer.Typer(help="Generate physically rich sphere-wall trajectories.")
 
 
 @app.command()
-def generate(config: Path, output: Path | None = None) -> None:
-    cfg = ExperimentConfig.from_yaml(config)
-    path = DatasetGenerator(cfg).generate(output)
-    print(f"[green]Wrote dataset:[/green] {path.resolve()}")
+def generate(
+    config: Annotated[
+        Path,
+        typer.Argument(
+            exists=True,
+            file_okay=True,
+            dir_okay=False,
+            readable=True,
+            help="YAML experiment configuration.",
+        ),
+    ], 
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Output HDF5 file."
+        ),
+    ] = None,
+    environment: Annotated[
+        EnvironmentKind | None,
+        typer.Option(
+            "--environment",
+            "-e",
+            case_sensitive=False,
+            help=(
+                "Environment geometry. If ommited, use "
+                "default_environment form the YAML file."
+            ),
+        ),
+    ] = None,
+) -> None:
+    config_data = ExperimentConfig.from_yaml(config)
+    generator = DatasetGenerator(
+        config=config_data,
+        environment_kind=environment,
+    )
+    path = generator.generate(output)
+    print(
+        f"[green]Wrote "
+        f"{generator.environment_kind.value} "
+        f"dataset:[/green] {path.resolve()}"
+    )
 
 
 @app.command("validate-config")

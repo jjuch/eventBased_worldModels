@@ -1,3 +1,27 @@
+default_environments: single-wall
+
+environments:
+  single_wall:
+    wall:
+      surface_id: wall
+      point: [0.0, 0.0, 0.0]
+      normal: [1.0, 0.0, 0.0]
+
+  u_box:
+    channel_width: 2.0
+    left_wall:
+      surface_id: left_wall
+      point: [0.0, 0.0, 0.0]
+      normal: [1.0, 0.0, 0.0]
+    right_wall:
+      surface_id: right_wall
+      point: [2.0, 0.0, 0.0]
+      normal: [1.0, 0.0, 0.0]
+    floor:
+      surface_id: floor
+      point: [0.0, 0.0, 0.0]
+      normal: [0.0, 0.0, 1.0]
+
 physics:
   mass: {low: 0.15, high: 0.25, scale: linear}
   radius: {low: 0.04, high: 0.06, scale: linear}
@@ -17,6 +41,36 @@ initial_state:
   vertical_position: {low: 0.3, high: 1.50, scale: linear}
   lateral_position: {low: -0.5, high: 0.5, scale: linear}
   spin: {low: -60.0, high: 60.0, scale: linear}
+u_box_initial_state:
+  x_fraction:
+    low: 0.25
+    high: 0.75
+    scale: linear
+  x_speed:
+    low: 1.0
+    high: 5.0
+    scale: linear
+  y_speed:
+    low: -1.5
+    high: 1.5
+    scale: linear
+  z_speed:
+    low: -1.0
+    high: 2.0
+    scale: linear
+  height:
+    low: 0.30
+    high: 1.50
+    scale: linear
+  lateral_position:
+    low: -0.50
+    high: 0.50
+    scale: linear
+  spin:
+    low: -60.0
+    high: 60.0
+    scale: linear
+  initial_horizontal_direction: random
 simulation:
   duration: 1.0
   internal_dt: 0.00002

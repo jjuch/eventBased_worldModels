@@ -5,21 +5,40 @@ from abc import ABC, abstractmethod
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from .models import ForceTorque, RigidBodyState, SphereParameters
+from .models import ForceTorque, RigidBodyState, SphereParameters, SimulationContext
 from .physics import ForceModel
 
 
 class Integrator(ABC):
     @abstractmethod
-    def step(self, state: RigidBodyState, params: SphereParameters, forces: ForceModel, dt: float) -> ForceTorque:
+    def step(
+        self, 
+        state: RigidBodyState, 
+        params: SphereParameters, 
+        forces: ForceModel,
+        context: SimulationContext, 
+        dt: float,
+    ) -> ForceTorque:
         raise NotImplementedError
 
 
 class SemiImplicitEuler(Integrator):
     """Stable, auditable baseline; replaceable without changing simulator or dataset APIs."""
 
-    def step(self, state: RigidBodyState, params: SphereParameters, forces: ForceModel, dt: float) -> ForceTorque:
-        result = forces.evaluate(state, params, dt)
+    def step(
+        self, 
+        state: RigidBodyState, 
+        params: SphereParameters, 
+        forces: ForceModel, 
+        context: SimulationContext, 
+        dt: float,
+    ) -> ForceTorque:
+        result = forces.evaluate(
+            state, 
+            params,
+            context,
+            dt,
+        )
         acceleration = result.force / params.mass
         angular_acceleration = result.torque / params.inertia_scalar
 

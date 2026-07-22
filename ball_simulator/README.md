@@ -4,7 +4,7 @@ Object-oriented Python package for generating synthetic sphere-wall trajectories
 
 ## Design
 
-- `SphereWallSimulator` owns simulation orchestration.
+- `BallSimulator` owns simulation orchestration.
 - `ForceModel` is an extension point for gravity, aerodynamics, walls, floors, and future force fields.
 - `Integrator` is replaceable; the baseline is semi-implicit Euler.
 - `ParameterSampler` separates domain randomization from mechanics.
@@ -12,6 +12,10 @@ Object-oriented Python package for generating synthetic sphere-wall trajectories
 - Observation-rate data and optional high-rate diagnostics are stored separately.
 
 The contact law is a non-adhesive Hunt-Crossley-style Hertz normal force and a history-dependent tangential spring-damper capped by Coulomb friction. Quaternions use SciPy's scalar-last `xyzw` convention.
+
+ ### IMPORTANT Note
+Contact evaluation mutates tangential-memory state.This is valid for the current one-evaluation-per-step integrator. Multi-stage or adaptive integrators require transactional contact state. This is an issue when the ball hits two walls at the same time (corners).
+
 
 ## Install
 
@@ -27,11 +31,12 @@ python -m pip install -e ".[dev]"
 ### Simulate
 ```bash
 ball_simulator validate-config configs/poc.yaml
-ball_simulator generate configs/poc.yaml --output trajectories.h5
+ball_simulator generate configs/poc.yaml --environment single-wall --output single_wall.h5
+ball_simulator generate configs/poc.yaml --environment u-box --output u_box.h5
 pytest -q
 ```
 
-For a fast smoke test, change `trajectories` to 2 and `duration` to 0.2 in a copy of the YAML file.
+For a fast smoke test, change `trajectories` to 2 and `duration` to 0.2 in a copy of the YAML file. Set the `default_environment` parameter in the YAML file and omit the `--environment` flag.
 
 ### Analyze
 #### Display the initial condition coverage
@@ -54,7 +59,7 @@ ball_simulator plot-trajectory trajectories.h5 17 --output trajectory_17.png --d
 Use high-rate samples by adding the `--high-rate` flag.
 
 #### Stratified inspection
-Inspect several regimes to verify the generated trajectories.
+Inspect several regimes in the large set of trajectories to verify the generated trajectories.
 ```bash
 ball_simulator inspect-regimes trajectories.h5 -o validation/regimes
 ball_simulator inspect-regimes trajectories.h5 -o validation/regimes --high-rate
