@@ -16,7 +16,7 @@ environments:
     right_wall:
       surface_id: right_wall
       point: [2.0, 0.0, 0.0]
-      normal: [1.0, 0.0, 0.0]
+      normal: [-1.0, 0.0, 0.0]
     floor:
       surface_id: floor
       point: [0.0, 0.0, 0.0]
