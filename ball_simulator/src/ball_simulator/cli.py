@@ -387,10 +387,6 @@ def inspect_regimes_command(
             help="Permit one trajectory to represent multiple regimes.",
         ),
     ] = False,
-    wall_x: Annotated[
-        float,
-        typer.Option("--wall-x", help="Wall-plane x coordinate."),
-    ] = 0.0,
 ) -> None:
     """Select and render representative physical regimes."""
     selected = render_stratified_inspection(
@@ -399,7 +395,6 @@ def inspect_regimes_command(
         include_diagnostics=diagnostics,
         use_high_rate=high_rate,
         allow_reuse=allow_reuse,
-        wall_x=wall_x
     )
     print(f"[green]Rendered {len(selected)} physical regimes:[/green]")
     for item in selected:

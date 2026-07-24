@@ -4,6 +4,7 @@ import csv
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Sequence
+import json
 
 import h5py
 import matplotlib.pyplot as plt
@@ -14,15 +15,18 @@ from .visualization import (
     load_trajectory,
     natural_trajectory_sort_key,
     plot_trajectory_3d,
-    plot_trajectory_diagnostics
+    plot_trajectory_diagnostics,
+    determine_initial_target_surface
 )
 from .physics import ContactMode
+from .dataset_geometry import EnvironmentGeometry, _decode_attribute, load_environment_geometry, load_root_metadata
 
 FloatArray = NDArray[np.float64]
 
 @dataclass(frozen=True, slots=True)
 class TrajectorySummary:
     trajectory_id: str
+    initial_target_surface: str
     initial_normal_speed: float
     initial_tangential_speed: float
     initial_linear_speed: float
@@ -34,6 +38,11 @@ class TrajectorySummary:
     mass: float
     radius: float
     contact_episodes: int
+    total_surface_episodes: int
+    maximum_simultaneous_contacts: int
+    simultaneous_contact_samples: int
+    contacted_surfaces: tuple[int, ...]
+    surface_epsiode_counts: tuple[int, ...]
     has_sticking: bool
     has_sliding: bool
     maximum_penetration: float
@@ -61,7 +70,33 @@ def _attr(attrs: h5py.AttributeManager, name: str, default: float = np.nan) -> f
     return float(attrs[name]) if name in attrs else float(default)
 
 
-def summarize_dataset(dataset: str | Path) -> list[TrajectorySummary]:
+def initial_incidence_features(
+        position: FloatArray,
+        velocity: FloatArray,
+        radius: float,
+        geometry: EnvironmentGeometry,
+) -> tuple[str, float, float, float]:
+    surface_id, _, normal_speed, tangential_speed = determine_initial_target_surface(
+        position, 
+        velocity, 
+        radius, 
+        geometry,
+        )
+
+    total_speed = float(np.linalg.norm(velocity))
+    incidence_cosine = normal_speed / total_speed if total_speed > 0.0 else 0.0
+
+    return (
+        surface_id,
+        normal_speed,
+        tangential_speed,
+        incidence_cosine
+    )
+
+
+def summarize_dataset(
+    dataset: str | Path,
+    geometry: EnvironmentGeometry) -> list[TrajectorySummary]:
     """Read compact per-trajectory features without loading positions/quaternions."""
     summaries: list[TrajectorySummary] = []
     with h5py.File(dataset, "r") as handle:
@@ -71,24 +106,21 @@ def summarize_dataset(dataset: str | Path) -> list[TrajectorySummary]:
             obs = group["observations"]
             attrs = group["parameters"].attrs
 
+            p0 = np.asarray(obs["position"][0], dtype=float)
             v0 = np.asarray(obs["linear_velocity"][0], dtype=float)
             w0 = np.asarray(obs["angular_velocity"][0], dtype=float)
             vf = np.asarray(obs["linear_velocity"][-1], dtype=float)
             wf = np.asarray(obs["angular_velocity"][-1], dtype=float)
             speed = float(np.linalg.norm(v0))
-            normal_speed = max(0.0, -float(v0[0]))
-            tangential_speed = float(np.linalg.norm(v0[1:]))
-            incidence_cosine = normal_speed / max(speed, np.finfo(float).eps)
+            # normal_speed = max(0.0, -float(v0[0]))
+            # tangential_speed = float(np.linalg.norm(v0[1:]))
+            # incidence_cosine = normal_speed / max(speed, np.finfo(float).eps)
 
             active = np.asarray(obs["contact_active"][:], dtype=bool)
-            if active.ndim == 1:
-                active = active[:, None]
             any_active = np.any(active, axis=1)
-            contact_episodes = _contact_episode_count(any_active)
+            active_contact_count = np.sum(active, axis=1)
 
             modes = np.asarray(obs["contact_mode"][:], dtype=np.int8)
-            if modes.ndim == 1:
-                modes = modes[:, None]
             
             has_sticking = bool(
                 np.any(modes == ContactMode.STICKING)
@@ -100,9 +132,40 @@ def summarize_dataset(dataset: str | Path) -> list[TrajectorySummary]:
             penetration = np.asarray(obs["penetration"][:], dtype=float)
             normal_force = np.asarray(obs["normal_force"][:], dtype=float)
 
+            surface_ids = tuple(
+                json.loads(_decode_attribute(group.attrs["surface_ids_json"]))
+            )
+
+            if surface_ids != geometry.surface_ids:
+                raise ValueError(
+                    f"Surface order mismatch for "
+                    f"trajectory {trajectory_id}."
+                )
+            radius = _attr(attrs, "radius")
+            target_surface, normal_speed, tangential_speed, incidence_cosine = initial_incidence_features(
+                p0,
+                v0,
+                radius,
+                geometry,
+            )
+
+            surface_episode_counts = tuple(
+                _contact_episode_count(active[:, surface_index]) 
+                for surface_index in range(len(surface_ids))
+            )
+            contact_episodes = _contact_episode_count(any_active)
+
+            contacted_surfaces = tuple(
+                surface_id for surface_index, surface_id in enumerate(surface_ids)
+                if np.any(active[:, surface_index])
+            )
+
+            total_force = np.sum(normal_force, axis=1)
+
             summaries.append(
                 TrajectorySummary(
                     trajectory_id=trajectory_id,
+                    initial_target_surface=target_surface,
                     initial_normal_speed=normal_speed,
                     initial_tangential_speed=tangential_speed,
                     initial_linear_speed=speed,
@@ -112,13 +175,18 @@ def summarize_dataset(dataset: str | Path) -> list[TrajectorySummary]:
                     normal_stiffness=_attr(attrs, "normal_stiffness"),
                     normal_damping=_attr(attrs, "normal_damping"),
                     mass=_attr(attrs, "mass"),
-                    radius=_attr(attrs, "radius"),
+                    radius=radius,
                     contact_episodes=contact_episodes,
+                    total_surface_episodes=int(sum(surface_episode_counts)),
+                    maximum_simultaneous_contacts=int(np.max(active_contact_count, initial=0)),
+                    simultaneous_contact_samples=int(np.count_nonzero(active_contact_count >= 2)),
+                    contacted_surfaces=contacted_surfaces,
+                    surface_epsiode_counts=surface_episode_counts,
                     has_sticking=has_sticking,
                     has_sliding=has_sliding,
                     maximum_penetration=float(np.max(penetration, initial=0.0)),
                     peak_normal_force=float(
-                        np.max(np.linalg.norm(normal_force, axis=1), initial=0.0)
+                        np.max(np.linalg.norm(total_force, axis=1), initial=0.0)
                     ),
                     final_linear_speed=float(np.linalg.norm(vf)),
                     final_angular_speed=float(np.linalg.norm(wf)),
@@ -167,8 +235,81 @@ def _pick(
     return SelectedTrajectory(regime, winner.trajectory_id, float(score(winner)), reason)
 
 
+def add_environment_specific_regimes(
+    summaries: Sequence[TrajectorySummary],
+    geometry: EnvironmentGeometry,
+    selected: list[SelectedTrajectory],
+    used: set[str],
+    allow_reuse: bool,
+) -> None:
+    def add(result: SelectedTrajectory | None) -> None:
+        if result is not None:
+            selected.append(result)
+
+    if geometry.kind == "u-box":
+        for surface_id in geometry.surface_ids:
+            add(
+                _pick(
+                    summaries,
+                    regime=f"most-{surface_id}-contacts",
+                    predicate=lambda item, sid = surface_id: (
+                        sid in item.contacted_surfaces
+                    ),
+                    score=lambda item, sid = surface_id: (
+                        -item.surface_episode_counts[
+                            geometry.surface_index(sid)
+                        ]
+                    ),
+                    reason=(
+                        f"Largest number of separated "
+                        f"{surface_id} contact episodes."
+                    ),
+                    used=used,
+                    allow_reuse=allow_reuse,
+                )
+            )
+
+        add(
+            _pick(
+                summaries,
+                regime="simultaneous-contact",
+                predicate=lambda item: (
+                    item.maximum_simultaneous_contacts >= 2
+                ),
+                score=lambda item: -item.simultaneous_contact_samples,
+                reason=(
+                    "Contains simultaneous contact with "
+                    "at least two surfaces."
+                ),
+                used=used,
+                allow_reuse=allow_reuse,
+            )
+        )
+        add(
+            _pick(
+                summaries,
+                regime="contacts-all-surfaces",
+                predicate=lambda item: (
+                    set(item.contacted_surfaces) == set(geometry.surface_ids)
+                ),
+                score=lambda item: (
+                -item.total_surface_episodes
+                ),
+                reason=(
+                "Contacts every U-box surface during "
+                "one trajectory."
+                ),
+                used=used,
+                allow_reuse=allow_reuse,
+            )
+        )
+    else:
+        return
+
+
 def select_stratified_regimes(
     summaries: Sequence[TrajectorySummary],
+    geometry: EnvironmentGeometry,
     *,
     allow_reuse: bool = False,
 ) -> list[SelectedTrajectory]:
@@ -304,6 +445,13 @@ def select_stratified_regimes(
         "No contact episode was recorded; useful for detecting invalid sampling horizons.",
         used, allow_reuse,
     ))
+    add_environment_specific_regimes(
+        summaries=summaries,
+        geometry=geometry,
+        selected=selected,
+        used=used,
+        allow_reuse=allow_reuse
+    )
     return selected
 
 
@@ -333,28 +481,33 @@ def render_stratified_inspection(
     include_diagnostics: bool = True,
     use_high_rate: bool = False,
     allow_reuse: bool = False,
-    wall_x: float = 0.0,
 ) -> list[SelectedTrajectory]:
-    summaries = summarize_dataset(dataset)
-    selected = select_stratified_regimes(summaries, allow_reuse=allow_reuse)
+    geometry = load_environment_geometry(dataset)
+    metadata = load_root_metadata(dataset)
+    gravity_vector = np.asarray(
+        metadata["simulation"]["gravity"], dtype=float
+    )
+    summaries = summarize_dataset(dataset, geometry)
+    selected = select_stratified_regimes(summaries, geometry, allow_reuse=allow_reuse)
     output = Path(output_directory)
     output.mkdir(parents=True, exist_ok=True)
-    write_manifest(output / "manifest.csv", selected, summaries)
+    write_manifest(output / f"manifest_{geometry.kind}.csv", selected, summaries)
 
     for item in selected:
         trajectory = load_trajectory(dataset, item.trajectory_id, use_high_rate=use_high_rate)
         plot_trajectory_3d(
-            trajectory,
-            wall_x=wall_x,
+            trajectory=trajectory,
+            geometry=geometry,
             output=output / f"{item.regime}__{item.trajectory_id}__3d.png",
             show=False,
         )
-        plt.close()
+        plt.close("all")
         if include_diagnostics:
             plot_trajectory_diagnostics(
                 trajectory,
+                gravity_vector=gravity_vector,
                 output=output / f"{item.regime}__{item.trajectory_id}__diagnostics.png",
                 show=False,
             )
-            plt.close()
+            plt.close("all")
     return selected
