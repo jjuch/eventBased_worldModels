@@ -14,6 +14,7 @@ from ball_simulator.visualization import (
     plot_initial_condition_spread, plot_trajectory_3d,
     plot_trajectory_diagnostics
 )
+from ball_simulator.dataset_geometry import EnvironmentGeometry, PlaneGeometry
 
 def test_load_initial_conditions(smoke_dataset):
     data = load_initial_conditions(smoke_dataset)
@@ -40,19 +41,31 @@ def test_visualizations_can_be_saved(smoke_dataset, tmp_path
     initial_output = tmp_path / "initial.png"
     trajectory_output = tmp_path / "trajectory.png"
     diagnostic_output = tmp_path / "diagnostics.png"
+    geometry = EnvironmentGeometry(
+            kind="single-wall",
+            surfaces=[PlaneGeometry(
+                surface_id="test",
+                point=np.asarray([0, 0, 0]),
+                normal=np.asarray([1, 0, 0])
+            )]
+        )
+    gravity_vector = np.asarray([0, 0, -1])
 
     plot_initial_condition_spread(
         initial_data,
+        geometry=geometry,
         output=initial_output,
         show=False,
     )
     plot_trajectory_3d(
         trajectory,
+        geometry=geometry,
         output=trajectory_output,
         show=False,
     )
     plot_trajectory_diagnostics(
         trajectory,
+        gravity_vector=gravity_vector,
         output=diagnostic_output,
         show=False,
     )
