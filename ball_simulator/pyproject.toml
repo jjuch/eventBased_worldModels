@@ -23,7 +23,8 @@ dependencies = [
 dev = ["pytest>=8.2", "ruff>=0.5", "mypy>=1.10"]
 
 [project.scripts]
-ball_simulator = "ball_simulator.cli:app"
+ball_simulator = "ball_simulator.trajectories.cli:app"
+ball_renderer = "ball_simulator.rendering.cli:app"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ball_simulator"]

@@ -8,13 +8,13 @@ import numpy as np
 import os
 import tempfile
 
-from ball_simulator.visualization import (
+from ball_simulator.trajectories.visualization import (
     load_initial_conditions,
     load_trajectory,
     plot_initial_condition_spread, plot_trajectory_3d,
     plot_trajectory_diagnostics
 )
-from ball_simulator.dataset_geometry import EnvironmentGeometry, PlaneGeometry
+from ball_simulator.trajectories.dataset_geometry import EnvironmentGeometry, PlaneGeometry
 
 def test_load_initial_conditions(smoke_dataset):
     data = load_initial_conditions(smoke_dataset)

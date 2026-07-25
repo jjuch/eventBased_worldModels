@@ -1,11 +1,11 @@
-from ball_simulator.regime_inspection import (
+from ball_simulator.trajectories.regime_inspection import (
     TrajectorySummary,
     _contact_episode_count,
     select_stratified_regimes,
 )
-from ball_simulator.dataset_geometry import load_environment_geometry, load_root_metadata, EnvironmentGeometry, PlaneGeometry
-from ball_simulator.visualization import load_trajectory, load_initial_conditions, plot_initial_condition_spread
-from ball_simulator.regime_inspection import plot_trajectory_3d, plot_trajectory_diagnostics
+from ball_simulator.trajectories.dataset_geometry import load_environment_geometry, load_root_metadata, EnvironmentGeometry, PlaneGeometry
+from ball_simulator.trajectories.visualization import load_trajectory, load_initial_conditions, plot_initial_condition_spread
+from ball_simulator.trajectories.regime_inspection import plot_trajectory_3d, plot_trajectory_diagnostics
 
 import numpy as np
 import pytest

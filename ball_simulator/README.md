@@ -26,7 +26,7 @@ source .venv/bin/activate
 python -m pip install -e ".[dev]"
 ```
 
-## Run
+## Generate trajectories
 
 ### Simulate
 ```bash
@@ -67,6 +67,23 @@ ball_simulator inspect-regimes trajectories.h5 -o validation/regimes --no-diagno
 ```
 The output directory contains `manifest.csv`, one 3D plot per selected regime, and optional physics-diagnostic plots. The selector uses dataset-relative deciles, so it continues to work when YAML ranges change. It reads only the fields needed for selection and only loads full trajectories after selection.
 
+## Render trajectories
+Once you are satisfied with the trajectories rendered with the `ball_simulator`, you can render the trajectories into a pixel-based output using Blender with the `ball_renderer`.
+
+### Blender installation
+Make sure Blender and FFMPEG is installed and added to the path:
+```bash
+ball_renderer blender-info
+ffmpeg -version
+```
+This will show you the version and the path. If it isn't on the path you can use `--blender-executable` followed by the absolute path to blender, but it is preferred to have it installed on the path.
+
+### Render a single path
+To run a single trajectory render do:
+```bash
+ball_renderer render-trajectory trajectories.h5 0 --config configs/render_debug.yaml --output-directory rendered/debug 
+```
+
 ## HDF5 layout
 
 ```text
@@ -90,3 +107,5 @@ Diagnostic labels include contact activity, mode, penetration, contact velocity,
 ## Important numerical note
 
 The default parameter ranges are proof-of-concept values, not calibrated material data. Always run time-step convergence studies before generating a large corpus. Increase stiffness only while reducing `internal_dt` sufficiently.
+
+

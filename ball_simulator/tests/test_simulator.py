@@ -1,9 +1,9 @@
 import numpy as np
 
-from ball_simulator.config import SimulationConfig
-from ball_simulator.models import RigidBodyState, SphereParameters
-from ball_simulator.simulator import BallSimulator, SimulationContext
-from ball_simulator.environments import EnvironmentFactory, EnvironmentKind, ExperimentConfig
+from ball_simulator.trajectories.config import SimulationConfig
+from ball_simulator.trajectories.models import RigidBodyState, SphereParameters
+from ball_simulator.trajectories.simulator import BallSimulator, SimulationContext
+from ball_simulator.trajectories.environments import EnvironmentFactory, EnvironmentKind, ExperimentConfig
 
 
 def params(friction=0.0, damping=0.2):

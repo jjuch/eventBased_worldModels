@@ -1,0 +1,28 @@
+width: 128
+height: 128
+fps: 50
+engine: BLENDER_EEVEE_NEXT
+samples: 4
+transparent_background: false
+source: high_rate
+frame_dt: 0.02
+fixed_visual_y_extent: 4.0
+wall_thickness: 0.08
+texture_scale: 5.0
+camera:
+  location: [3.8, -4.5, 2.8]
+  target: [1.0, 0.0, 0.7]
+  focal_length_mm: 42.0
+  sensor_width_mm: 36.0
+lighting:
+  world_strength: 0.18
+  key_energy: 850.0
+  key_size: 4.0
+  fill_energy: 300.0
+  fill_size: 3.0
+outputs:
+  rgb: true
+  depth: false
+  segmentation: true
+  preview_mp4: true
+  keep_exr: false
