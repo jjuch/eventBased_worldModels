@@ -29,6 +29,32 @@ class OutputConfig(BaseModel):
     keep_exr: bool = False
 
 
+class EnvironmentRenderConfig(BaseModel):
+    representation: Literal[
+        "opaque",
+        "transparent_near_wall",
+        "cutaway",
+        "boundaries_only",
+    ] = "cutaway"
+
+    near_wall_alpha: float = Field(default=0.12, ge=0.0, le=1.0)
+    show_near_wall_frame: bool = True
+    frame_thickness: float = Field(default=0.025, gt=0.0)
+    show_near_wall_grid: bool = True
+    grid_spacing: float = Field(default=0.50, gt=0.0)
+    grid_thickness: float = Field(default=0.008, gt=0.0)
+    checkerboard_enabled: bool = True
+    checker_size: float = Field(default=0.25, gt=0.0)
+    checker_contrast: float = Field(default=0.20, ge=0.0, le=1.0)
+
+class BallRenderConfig(BaseModel):
+    base_color: tuple[float, float, float, float] = (0.78, 0.80, 0.84, 1.0)
+    roughness: float = Field(default=0.42, ge=0.0, le=1.0)
+    markers_enabled: bool = True
+    marker_angular_radius_degree: float = Field(default=13.0, gt=1.0, lt=45.0)
+    marker_surface_offset: float = Field(default=0.003, ge=0.0)
+
+
 class RenderConfig(BaseModel):
     width: int = Field(default=128, ge=32)
     height: int = Field(default=128, ge=32)
@@ -40,8 +66,9 @@ class RenderConfig(BaseModel):
     frame_dt: float | None = Field(default=0.01, gt=0.0)
     fixed_visual_y_extent: float = Field(default=4.0, gt=0.0)
     wall_thickness: float = Field(default=0.08, gt=0.0)
-    texture_scale: float = Field(default=5.0, gt=0.0)
     camera: CameraConfig = CameraConfig()
+    environment: EnvironmentRenderConfig = EnvironmentRenderConfig()
+    ball: BallRenderConfig = BallRenderConfig()
     lighting: LightingConfig = LightingConfig()
     outputs: OutputConfig = OutputConfig()
 
@@ -55,3 +82,5 @@ class RenderConfig(BaseModel):
     def from_yaml(cls, path: str | Path) -> "RenderConfig":
         with Path(path).open("r", encoding="utf-8") as handle:
             return cls.model_validate(yaml.safe_load(handle))
+
+

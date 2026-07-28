@@ -69,3 +69,5 @@ def prepare_render_job(
     job_path = job_directory / f"trajectory_{resolved_id}.json"
     job_path.write_text(json.dumps(job, indent=2), encoding="utf-8")
     return job_path
+
+

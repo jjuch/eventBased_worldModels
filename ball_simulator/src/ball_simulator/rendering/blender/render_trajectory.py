@@ -12,6 +12,30 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+TETRAHEDRAL_DIRECTIONS = np.asarray(
+    [
+        [1.0, 1.0, 1.0],
+        [1.0, -1.0, -1.0],
+        [-1.0, 1.0, -1.0],
+        [-1.0, -1.0, 1.0],
+    ],
+    dtype=float,
+)
+
+TETRAHEDRAL_DIRECTIONS /= np.linalg.norm(
+    TETRAHEDRAL_DIRECTIONS,
+    axis=1,
+    keepdims=True,
+)
+
+
+MARKER_COLORS = (
+    (0.90, 0.05, 0.25, 1.0),  # Red
+    (0.05, 0.25, 0.95, 1.0),  # Blue
+    (0.05, 0.80, 0.20, 1.0),  # Green
+    (0.95, 0.95, 0.05, 1.0),  # Yellow
+)
+
 
 def arguments() -> argparse.Namespace:
     args = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
@@ -34,8 +58,285 @@ def material(name: str, color: tuple[float, float, float, float], roughness: flo
     mat.use_nodes = True
     bsdf = mat.node_tree.nodes.get("Principled BSDF")
     bsdf.inputs["Base Color"].default_value = color
+    bsdf.inputs["Alpha"].default_value = color[3]
     bsdf.inputs["Roughness"].default_value = roughness
+    mat.blend_method = 'BLEND'
+    # mat.shadow_method = 'HASHED'
     return mat
+
+def clamp_color(color: tuple[float, float, float, float]) -> tuple[float, float, float, float]:
+    return tuple(
+        max(0.0, min(1.0, float(component))) for component in color
+    )
+
+def lighten_color(color: tuple[float, float, float, float], amount: float) -> tuple[float, float, float, float]:
+    red, green, blue, alpha = color
+    return clamp_color(
+        (red + amount, green + amount, blue + amount, alpha)
+    )
+
+def darken_color(color: tuple[float, float, float, float], amount: float) -> tuple[float, float, float, float]:
+    red, green, blue, alpha = color
+    return clamp_color(
+        (red - amount, green - amount, blue - amount, alpha)
+    )
+
+
+def checkerboard_material(
+    name: str, base_color: tuple[float, float, float, float],
+    contrast: float, cell_counts: tuple[float, float, float],
+    roughness: float = 0.75,
+):
+    material_data = bpy.data.materials.new(name)
+    material_data.use_nodes = True
+
+    nodes = material_data.node_tree.nodes
+    links = material_data.node_tree.links
+
+    nodes.clear()
+
+    output = nodes.new("ShaderNodeOutputMaterial")
+    output.location = (520, 0)
+
+    shader = nodes.new("ShaderNodeBsdfPrincipled")
+    shader.location = (260, 0)
+    shader.inputs["Alpha"].default_value = base_color[3]
+    shader.inputs["Roughness"].default_value = roughness 
+
+    texture_coordinates = nodes.new("ShaderNodeTexCoord")
+    texture_coordinates.location = (-620, 0)
+
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.location = (-420, 0)
+    mapping.inputs["Scale"].default_value = (
+        float(cell_counts[0]),
+        float(cell_counts[1]),
+        float(cell_counts[2]),
+    )
+
+    checker = nodes.new("ShaderNodeTexChecker")
+    checker.location = (-160, 0)
+    checker.inputs["Color1"].default_value = lighten_color(base_color, contrast / 2.0)
+    checker.inputs["Color2"].default_value = darken_color(base_color, contrast / 2.0)
+    # Mapping already sets the physical frequency
+    checker.inputs["Scale"].default_value = 1.0
+
+    links.new(texture_coordinates.outputs["Generated"], mapping.inputs["Vector"])
+    links.new(
+        mapping.outputs["Vector"], checker.inputs["Vector"]
+    )
+    links.new(
+        checker.outputs["Color"], shader.inputs["Base Color"]
+    )
+    links.new(
+        shader.outputs["BSDF"], output.inputs["Surface"]
+    )
+    return material_data
+
+def grid_line_material():
+    return material(
+        "BoundaryGrid",
+        color=(0.66, 0.82, 0.92, 1.0),
+        roughness=0.45
+    )
+
+def transparent_surface_material(
+    name: str,
+    color: tuple[float, float, float, float],
+    alpha: float,
+):
+    material_data = bpy.data.materials.new(name)
+    material_data.use_nodes = True
+
+    nodes = material_data.node_tree.nodes
+    links = material_data.node_tree.links
+
+    nodes.clear()
+
+    output = nodes.new(
+        "ShaderNodeOutputMaterial"
+    )
+
+    transparent_shader = nodes.new(
+        "ShaderNodeBsdfTransparent"
+    )
+
+    transparent_shader.inputs[
+        "Color"
+    ].default_value = (
+        color[0],
+        color[1],
+        color[2],
+        1.0,
+    )
+
+    principled_shader = nodes.new(
+        "ShaderNodeBsdfPrincipled"
+    )
+
+    principled_shader.inputs[
+        "Base Color"
+    ].default_value = color
+
+    principled_shader.inputs[
+        "Roughness"
+    ].default_value = 0.65
+
+    mix_shader = nodes.new(
+        "ShaderNodeMixShader"
+    )
+
+    # Alpha = 0 means fully transparent.
+    # Alpha = 1 means fully opaque.
+    mix_shader.inputs[
+        "Fac"
+    ].default_value = float(alpha)
+
+    links.new(
+        transparent_shader.outputs["BSDF"],
+        mix_shader.inputs[1],
+    )
+    links.new(
+        principled_shader.outputs["BSDF"],
+        mix_shader.inputs[2],
+    )
+    links.new(
+        mix_shader.outputs["Shader"],
+        output.inputs["Surface"],
+    )
+
+    # Blender 4.2+.
+    if hasattr(
+        material_data,
+        "surface_render_method",
+    ):
+        try:
+            material_data.surface_render_method = (
+                "DITHERED"
+            )
+        except TypeError:
+            pass
+
+    # Older Blender fallback.
+    if hasattr(
+        material_data,
+        "blend_method",
+    ):
+        try:
+            material_data.blend_method = "HASHED"
+        except TypeError:
+            pass
+
+    return material_data
+
+
+def marker_material(
+    index: int,
+    color: tuple[float, float, float, float],
+):
+    return material(
+        name=f"BallMarkerMaterial_{index}",
+        color=color,
+        roughness=0.32,
+    )
+
+def add_beam(
+        name: str,
+        location: tuple[float, float, float],
+        dimensions: tuple[float, float, float],
+        beam_material, # bpy.material
+        pass_index: int = 0,
+):
+    bpy.ops.mesh.primitive_cube_add(size=1.0, location=location)
+
+    beam = bpy.context.object
+    beam.name = name
+    beam.dimensions = dimensions
+
+    bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+    beam.data.materials.append(beam_material)
+    beam.pass_index = pass_index
+
+    return beam
+
+
+def add_wall_frame_and_grid(
+    surface_id: str,
+    plane_x: float,
+    y_min: float,
+    y_max: float,
+    z_min: float,
+    z_max: float,
+    frame_thickness: float,
+    grid_spacing: float,
+    grid_thickness: float,
+    show_frame: bool,
+    show_grid: bool,
+    frame_material,
+) -> list:
+    objects = []
+
+    y_center = 0.5 * (y_min + y_max)
+    z_center = 0.5 * (z_min + z_max)
+    y_length = y_max - y_min
+    z_height = z_max - z_min
+    depth = max(frame_thickness, grid_thickness) 
+
+    if show_frame:
+        # Bottom and top horizontal rails
+        for name, z_position in (
+            ("bottom", z_min), ("top", z_max)
+        ):
+            objects.append(
+                add_beam(
+                    name=f"{surface_id}_frame_{name}",
+                    location=(plane_x, y_center, z_position),
+                    dimensions=(depth, y_length, frame_thickness),
+                    beam_material=frame_material,
+                )
+            )
+
+        # End posts in the visual y-direction
+        for name, y_position in (
+            ("front", y_min), ("back", y_max)
+        ):
+            objects.append(
+                add_beam(
+                    name=f"{surface_id}_frame_{name}",
+                    location=(plane_x, y_position, z_center),
+                    dimensions=(depth, frame_thickness, z_height),
+                    beam_material=frame_material,
+                )
+            )
+
+    if show_grid:
+        # Lines parallel to z at regular y positions
+        y_positions = np.arange(y_min + grid_spacing, y_max, grid_spacing)
+
+        for index, y_position in enumerate(y_positions):
+            objects.append(
+                add_beam(
+                    name=f"{surface_id}_grid_vertical_{index:03d}",
+                    location=(plane_x, float(y_position), z_center),
+                    dimensions=(depth, grid_thickness, z_height),
+                    beam_material=frame_material,
+                )
+            )
+
+        # Lines parallel to y at regular z positions
+        z_positions = np.arange(z_min + grid_spacing, z_max, grid_spacing)
+        
+        for index, z_position in enumerate(z_positions):
+            objects.append(
+                add_beam(
+                    name=f"{surface_id}_grid_horizontal_{index:03d}",
+                    location=(plane_x, y_center, float(z_position)),
+                    dimensions=(depth, y_length, grid_thickness),
+                    beam_material=frame_material,
+                )
+            )
+
+    return objects
 
 
 def striped_ball_material(scale: float):
@@ -72,7 +373,13 @@ def cube(name: str, location, scale, mat, pass_index: int):
     bpy.ops.mesh.primitive_cube_add(size=1.0, location=location)
     obj = bpy.context.object
     obj.name = name
-    obj.scale = scale
+    obj.dimensions = scale
+
+    bpy.ops.object.transform_apply(
+        location=False,
+        rotation=False,
+        scale=True,
+    )
     obj.data.materials.append(mat)
     obj.pass_index = pass_index
     return obj
@@ -80,31 +387,106 @@ def cube(name: str, location, scale, mat, pass_index: int):
 
 def build_environment(job: dict):
     render = job["render"]
-    extent = float(render["fixed_visual_y_extent"])
-    thickness = float(render["wall_thickness"])
+    environment_render = render["environment"]
+    visual_y_extent = float(render["fixed_visual_y_extent"])
+    wall_thickness = float(render["wall_thickness"])
+    frame_thickness = float(environment_render["frame_thickness"])
+    grid_spacing = float(environment_render["grid_spacing"])
+    grid_thickness = float(environment_render["grid_thickness"])
+    show_frame = float(environment_render["show_near_wall_frame"])
+    show_grid = float(environment_render["show_near_wall_grid"])
+
     radius = float(job["radius"])
+    channel_width = float(job["environment"].get("channel_width") or 2.0)
     surfaces = {s["surface_id"]: s for s in job["environment"]["surfaces"]}
-    wall_mat = material("Walls", (0.22, 0.28, 0.36, 1.0), 0.72)
-    floor_mat = material("Floor", (0.20, 0.17, 0.14, 1.0), 0.82)
-    visuals = []
-    for index, (surface_id, surface) in enumerate(surfaces.items(), start=2):
+    camera_location = np.asarray(
+            render["camera"]["location"], dtype=float
+        )
+    near_wall_id = camera_facing_wall(
+        surfaces=surfaces,
+        camera_location=camera_location
+    )
+    representation = environment_render["representation"]
+    checker_size = float(environment_render["checker_size"])
+    checker_contrast = float(environment_render["checker_contrast"])
+    y_length = 2.0 * visual_y_extent
+    wall_height = 2.0
+    wall_cell_counts = (1.0, max(1.0, y_length / checker_size), max(1.0, wall_height / checker_size)) 
+    floor_cell_counts = (max(1.0, channel_width / checker_size), max(1.0, y_length / checker_size), 1.0)
+
+    opaque_wall_material = checkerboard_material("WallCheckerBoar", (0.27, 0.24, 0.43, 1.0),contrast=checker_contrast, cell_counts=wall_cell_counts, roughness=0.72)
+    floor_material = checkerboard_material(name="FloorCheckerBoard",
+                                           base_color=(0.28, 0.24, 0.20, 1.0), contrast=checker_contrast, cell_counts=floor_cell_counts, roughness=0.82)
+    alpha = render["environment"]["near_wall_alpha"]
+    transparent_wall_material = transparent_surface_material(
+        name="NearWallTransparent",
+        color=(0.42, 0.58, 0.68, 1.0),
+        alpha=float(alpha),
+    )
+    boundary_material = grid_line_material()
+    
+    visual_objects = []
+    
+    for pass_index, (surface_id, surface) in enumerate(surfaces.items(), start=2):
         point = np.asarray(surface["point"], dtype=float)
         normal = np.asarray(surface["normal"], dtype=float)
-        axis = int(np.argmax(np.abs(normal)))
-        if axis == 0:  # vertical x wall
-            location = (point[0] - normal[0] * thickness / 2.0, 0.0, 1.25)
-            scale = (thickness, 2.0 * extent, 2.5)
-            mat = wall_mat
-        elif axis == 2:  # floor
-            location = (float(job["environment"].get("channel_width") or 2.0) / 2.0, 0.0,
-                        point[2] - normal[2] * thickness / 2.0)
-            scale = (float(job["environment"].get("channel_width") or 2.0) + 2 * radius,
-                     2.0 * extent, thickness)
-            mat = floor_mat
-        else:
-            continue
-        visuals.append(cube(surface_id, location, scale, mat, index))
-    return visuals
+        dominant_axis = int(np.argmax(np.abs(normal)))
+        is_near_wall = (surface_id == near_wall_id)
+
+        if dominant_axis == 0:  # vertical x wall
+            plane_x = float(point[0])
+            location = (plane_x - normal[0] * wall_thickness / 2.0, 0.0, wall_height / 2.0)
+            scale = (wall_thickness, y_length, wall_height)
+            selected_material = (
+                transparent_wall_material if (
+                    is_near_wall and representation in ("cutaway", "boundaries_only")
+                ) else opaque_wall_material
+            )
+            visual_objects.append(
+                cube(
+                    name=surface_id,
+                    location=location,
+                    scale=scale,
+                    mat=selected_material,
+                    pass_index=pass_index
+                )
+            )
+            if is_near_wall:
+                visual_objects.extend(
+                    add_wall_frame_and_grid(
+                        surface_id=surface_id,
+                        plane_x=plane_x,
+                        y_min=-visual_y_extent,
+                        y_max=visual_y_extent,
+                        z_min=0.0,
+                        z_max=wall_height,
+                        frame_thickness=frame_thickness,
+                        grid_spacing=grid_spacing,
+                        grid_thickness=grid_thickness,
+                        show_frame=show_frame,
+                        show_grid=show_grid,
+                        frame_material=boundary_material,
+                    )
+                )
+        elif dominant_axis == 2:  # floor
+            floor_z = float(point[2])
+            location = (channel_width / 2.0, 0.0,
+                        floor_z - normal[2] * wall_thickness / 2.0)
+            scale = (channel_width + 2 * radius,
+                     y_length, wall_thickness)
+
+            visual_objects.append(
+                cube(
+                    name=surface_id,
+                    location=location,
+                    scale=scale,
+                    mat=floor_material,
+                    pass_index=pass_index
+                )
+            )
+
+
+    return visual_objects
 
 
 def look_at(camera, target) -> None:
@@ -122,6 +504,47 @@ def add_camera(config: dict):
     look_at(camera, config["target"])
     bpy.context.scene.camera = camera
     return camera
+
+def camera_facing_wall(
+    surfaces: list[dict],
+    camera_location: np.ndarray,
+) -> str:
+    vertical_walls = []
+    for surface_key in surfaces.keys():
+        surface = surfaces[surface_key]
+        normal = np.asarray(
+            surface["normal"],
+            dtype=float,
+        )
+
+        if abs(normal[0]) < 0.9:
+            continue
+
+        point = np.asarray(
+            surface["point"],
+            dtype=float,
+        )
+
+        distance = abs(
+            np.dot(
+                camera_location - point,
+                normal,
+            )
+        )
+
+        vertical_walls.append(
+            (
+                distance,
+                surface["surface_id"],
+            )
+        )
+
+    if not vertical_walls:
+        raise ValueError(
+            "No x-normal vertical walls found."
+        )
+
+    return min(vertical_walls)[1]
 
 
 def add_area_light(name: str, location, energy: float, size: float, target):
@@ -176,13 +599,54 @@ def setup_scene(job: dict):
 
 
 def setup_ball(job: dict):
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=48, ring_count=24, radius=float(job["radius"]))
+    radius = float(job["radius"])
+    config = job["render"]["ball"]
+
+    bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, radius=radius, location=(0.0, 0.0, 0.0))
     ball = bpy.context.object
     ball.name = "Ball"
-    ball.data.materials.append(striped_ball_material(float(job["render"]["texture_scale"])))
+    ball.rotation_mode = "QUATERNION"
+    ball.data.materials.append(
+        material(
+            "BallBase",
+            tuple(config["base_color"]),
+            float(config["roughness"])
+        )
+    )
     ball.pass_index = 1
     bpy.ops.object.shade_smooth()
-    return ball
+
+    markers = []
+
+    if config["markers_enabled"]:
+        angular_radius = math.radians(
+            float(config["marker_angular_radius_degree"])
+        )
+        marker_radius = radius * math.sin(angular_radius)
+        center_distance= (
+            radius + float(config["marker_surface_offset"])
+            - 0.5 * marker_radius
+        )
+
+        for index, (direction, color) in enumerate(zip(
+            TETRAHEDRAL_DIRECTIONS, MARKER_COLORS, strict=True,
+        )):
+            bpy.ops.mesh.primitive_uv_sphere_add(
+                segments=24,
+                ring_count=12,
+                radius=marker_radius,
+                location=(0.0, 0.0, 0.0),
+            )
+            marker = bpy.context.object
+            marker.name = f"BallMarker_{index}"
+            marker.parent = ball
+            marker.location = tuple(direction * center_distance)
+            marker.pass_index = 1
+            marker.data.materials.append(marker_material(index, color))
+
+            bpy.ops.object.shade_smooth()
+            markers.append(marker)
+    return ball, markers
 
 
 def render_rgb(scene, output_root: Path, ball, states):
@@ -199,13 +663,15 @@ def render_rgb(scene, output_root: Path, ball, states):
         bpy.ops.render.render(write_still=True)
 
 
-def render_semantic(scene, output_root: Path, ball, environment_objects, states):
+def render_semantic(scene, output_root: Path, ball, ball_markers, environment_objects, states):
     """Robust semantic masks via flat emission materials, no compositor/version coupling."""
     seg_dir = output_root / "segmentation"
     seg_dir.mkdir(parents=True, exist_ok=True)
     original_world = scene.world
     hidden_lights = [(obj, obj.hide_render) for obj in bpy.data.objects if obj.type == "LIGHT"]
-    originals = {obj.name: list(obj.data.materials) for obj in [ball, *environment_objects]}
+    ball_objects = [ball, *ball_markers]
+    all_objects = [*ball_objects, *environment_objects]
+    originals = {obj.name: list(obj.data.materials) for obj in all_objects}
     colors = {
         "Ball": (1.0, 0.0, 0.0, 1.0),
         "floor": (0.0, 1.0, 0.0, 1.0),
@@ -241,10 +707,16 @@ def render_semantic(scene, output_root: Path, ball, environment_objects, states)
         scene.frame_set(i + 1)
         scene.render.filepath = str(seg_dir / f"{i:06d}.png")
         bpy.ops.render.render(write_still=True)
-    for obj in [ball, *environment_objects]:
+    for obj in all_objects:
         obj.data.materials.clear()
-        for mat in originals[obj.name]:
-            obj.data.materials.append(mat)
+
+        if obj in ball_objects: obj.data.materials.append(mats["Ball"])
+        elif"floor" in obj.name: obj.data.materials.append(mats["floor"])
+        elif "left_wall" in obj.name: obj.data.materials.append(mats["left_wall"])
+        elif "right_wall" in obj.name: obj.data.materials.append(mats["right_wall"])
+        else:
+            obj.data.materials.append(mat["wall"])
+    
     for obj, old in hidden_lights:
         obj.hide_render = old
     scene.world = original_world
@@ -292,12 +764,12 @@ def main() -> None:
     clear_scene()
     setup_scene(job)
     environment_objects = build_environment(job)
-    ball = setup_ball(job)
+    ball, ball_markers = setup_ball(job)
     scene = bpy.context.scene
     if job["render"]["outputs"]["rgb"]:
         render_rgb(scene, output_root, ball, states)
     if job["render"]["outputs"]["segmentation"]:
-        render_semantic(scene, output_root, ball, environment_objects, states)
+        render_semantic(scene, output_root, ball, ball_markers, environment_objects, states)
     # Depth is intentionally deferred to EXR/render-pass implementation after RGB baseline validation.
     if job["render"]["outputs"]["depth"]:
         print("[WARN] Depth requested but not implemented in baseline patch; RGB/segmentation are rendered.")

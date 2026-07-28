@@ -8,18 +8,34 @@ source: high_rate
 frame_dt: 0.01
 fixed_visual_y_extent: 4.0
 wall_thickness: 0.08
-texture_scale: 5.0
 camera:
   location: [3.8, -4.5, 2.8]
   target: [1.0, 0.0, 0.7]
   focal_length_mm: 42.0
   sensor_width_mm: 36.0
 lighting:
-  world_strength: 0.18
-  key_energy: 850.0
-  key_size: 4.0
-  fill_energy: 300.0
+  world_strength: 0.08
+  key_energy: 1400.0
+  key_size: 2.0
+  fill_energy: 140.0
   fill_size: 3.0
+environment:
+  representation: cutaway
+  near_wall_alpha: 0.12
+  show_near_wall_frame: true
+  frame_thickness: 0.025
+  show_near_wall_grid: true
+  grid_spacing: 0.40
+  grid_thickness: 0.010
+  checkerboard_enabled: true
+  checker_size: 0.25
+  checker_contrast: 0.20
+ball:
+  base_color: [0.78, 0.80, 0.84, 1.0]
+  roughness: 0.42
+  markers_enabled: true
+  marker_angular_radius_degrees: 13.0
+  marker_surface_offset: 0.003
 outputs:
   rgb: true
   depth: false
