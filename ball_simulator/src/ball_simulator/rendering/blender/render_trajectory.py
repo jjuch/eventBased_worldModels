@@ -137,13 +137,14 @@ def grid_line_material():
     return material(
         "BoundaryGrid",
         color=(0.66, 0.82, 0.92, 1.0),
-        roughness=0.45
+        roughness=0.00
     )
 
 def transparent_surface_material(
     name: str,
     color: tuple[float, float, float, float],
     alpha: float,
+    roughness: float = 0.65,
 ):
     material_data = bpy.data.materials.new(name)
     material_data.use_nodes = True
@@ -180,7 +181,7 @@ def transparent_surface_material(
 
     principled_shader.inputs[
         "Roughness"
-    ].default_value = 0.65
+    ].default_value = roughness
 
     mix_shader = nodes.new(
         "ShaderNodeMixShader"
@@ -422,6 +423,7 @@ def build_environment(job: dict):
         name="NearWallTransparent",
         color=(0.42, 0.58, 0.68, 1.0),
         alpha=float(alpha),
+        roughness=0.0,
     )
     boundary_material = grid_line_material()
     
