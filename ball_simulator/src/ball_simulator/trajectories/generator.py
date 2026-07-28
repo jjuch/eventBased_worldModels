@@ -10,6 +10,7 @@ from .environments import EnvironmentFactory, EnvironmentKind
 from .sampling import InitialStateSamplerFactory, ParameterSampler
 from .simulator import BallSimulator
 from .storage import HDF5TrajectoryWriter
+from .parallel import generate_parallel_dataset
 
 
 class DatasetGenerator:
@@ -67,3 +68,20 @@ class DatasetGenerator:
                 )
                 writer.write(i, trajectory)
         return path
+
+    def generate_with_workers(
+        self,
+        output: str | Path | None = None,
+        workers: int = 1,
+    ) -> Path:
+        path = Path(output or self.config.dataset.output)
+
+        if workers == 1:
+            return self.generate(path)
+
+        return generate_parallel_dataset(
+            config=self.config,
+            environment_kind=self.environment_kind,
+            output=path,
+            workers=workers,
+        )

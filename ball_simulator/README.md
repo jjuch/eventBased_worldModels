@@ -31,12 +31,12 @@ python -m pip install -e ".[dev]"
 ### Simulate
 ```bash
 ball_simulator validate-config configs/poc.yaml
-ball_simulator generate configs/poc.yaml --environment single-wall --output single_wall.h5
-ball_simulator generate configs/poc.yaml --environment u-box --output u_box.h5
+ball_simulator generate configs/poc.yaml --environment single-wall --output single_wall.h5 --workers 0
+ball_simulator generate configs/poc.yaml --environment u-box --output u_box.h5 --workers 0
 pytest -q
 ```
 
-For a fast smoke test, change `trajectories` to 2 and `duration` to 0.2 in a copy of the YAML file. Set the `default_environment` parameter in the YAML file and omit the `--environment` flag.
+For a fast smoke test, change `trajectories` to 2 and `duration` to 0.2 in a copy of the YAML file. Set the `default_environment` parameter in the YAML file and omit the `--environment` flag. The `--workers` flag can be used to parallelise the task by distributing the work over several CPU cores (0: all available cores | 1: serial execution).
 
 ### Analyze
 #### Display the initial condition coverage

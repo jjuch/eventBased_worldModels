@@ -58,13 +58,29 @@ def generate(
             ),
         ),
     ] = None,
+    workers: Annotated[
+        int,
+        typer.Option(
+            "--workers",
+            "-w",
+            min=0,
+            help=(
+                "Simulation worker processes. "
+                "Use 1 for serial execution and "
+                "0 for automatic selection."
+            ),
+        ),
+    ] = 1,
 ) -> None:
     config_data = ExperimentConfig.from_yaml(config)
     generator = DatasetGenerator(
         config=config_data,
         environment_kind=environment,
     )
-    path = generator.generate(output)
+    path = generator.generate_with_workers(
+        output=output,
+        workers=workers,
+        )
     print(
         f"[green]Wrote "
         f"{generator.environment_kind.value} "

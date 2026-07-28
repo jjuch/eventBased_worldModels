@@ -225,3 +225,5 @@ __marimo__/
 # Ignore folders
 validation/ 
 rendered/
+ball_simulator/*.png
+ball_simulator/*.h5
