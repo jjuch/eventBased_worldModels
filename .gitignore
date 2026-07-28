@@ -221,6 +221,7 @@ __marimo__/
 #############################
 # Package-specific
 #############################
+.vscode
 
 # Ignore folders
 validation/ 
