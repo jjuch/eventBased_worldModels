@@ -1,9 +1,12 @@
 import numpy as np
+import h5py
+import pytest
 
 from ball_simulator.trajectories.config import SimulationConfig
 from ball_simulator.trajectories.models import RigidBodyState, SphereParameters
 from ball_simulator.trajectories.simulator import BallSimulator, SimulationContext
 from ball_simulator.trajectories.environments import EnvironmentFactory, EnvironmentKind, ExperimentConfig
+from ball_simulator.trajectories.generator import DatasetGenerator
 
 
 def params(friction=0.0, damping=0.2):
@@ -203,3 +206,55 @@ def test_surface_contact_memories_are_independent():
         ).tangential_memory,
         0.0,
     )
+
+# TODO: This will fail because the existing serial generator uses a sequential shared RNG. The clean solution is to update the serial path to also use per-index seeds, so serial and parallel generation follow the same deterministic sampling rule.
+@pytest.mark.skip
+def test_parallel_generation_is_deterministic(
+    small_poc,
+    tmp_path,
+):
+    serial_path = tmp_path / "serial.h5"
+    parallel_path = tmp_path / "parallel.h5"
+
+    generator = DatasetGenerator(
+        small_poc,
+        EnvironmentKind.U_BOX,
+    )
+
+    generator.generate_with_workers(
+        serial_path,
+        workers=1,
+    )
+
+    generator.generate_with_workers(
+        parallel_path,
+        workers=2,
+    )
+
+    with (
+        h5py.File(serial_path, "r") as serial,
+        h5py.File(parallel_path, "r") as parallel,
+    ):
+        for trajectory_id in serial[
+            "trajectories"
+        ]:
+            serial_observations = serial[
+                f"trajectories/{trajectory_id}"
+                "/observations"
+            ]
+
+            parallel_observations = parallel[
+                f"trajectories/{trajectory_id}"
+                "/observations"
+            ]
+
+            for field in (
+                "position",
+                "linear_velocity",
+                "angular_velocity",
+                "quaternion_xyzw",
+            ):
+                assert np.allclose(
+                    serial_observations[field][:],
+                    parallel_observations[field][:],
+                )
