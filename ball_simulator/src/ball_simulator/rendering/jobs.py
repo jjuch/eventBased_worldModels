@@ -7,7 +7,7 @@ import h5py
 import numpy as np
 
 from ball_simulator.trajectories.dataset_geometry import load_environment_geometry
-from ball_simulator.trajectories.visualization import load_trajectory
+from ball_simulator.trajectories.visualization import load_trajectory, list_trajectory_ids
 
 from .config import RenderConfig
 from .resampling import resample_states
@@ -71,3 +71,53 @@ def prepare_render_job(
     return job_path
 
 
+def prepared_output_directory(
+    output_directory: str | Path,
+    trajectory_id: str,
+) -> Path:
+    return Path(output_directory).resolve() / f"trajectory_{trajectory_id}"
+
+
+def render_is_complete(
+    output_directory: str | Path,
+    trajectory_id: str,
+) -> bool:
+    return (
+        prepared_output_directory(
+            output_directory,
+            trajectory_id,
+        ) / "_SUCCESS"
+    ).is_file()
+
+
+def prepare_all_render_jobs(
+    dataset: str | Path,
+    config: RenderConfig,
+    output_directory: str | Path,
+    *,
+    resume: bool = False,
+) -> list[Path]:
+    trajectory_ids = list_trajectory_ids(dataset)
+
+    jobs: list[Path] = []
+
+    for trajectory_id in trajectory_ids:
+        if (
+            resume
+            and render_is_complete(
+                output_directory,
+                trajectory_id,
+            )
+        ):
+            continue
+
+        jobs.append(
+            prepare_render_job(
+                dataset=dataset,
+                trajectory_id=trajectory_id,
+                config=config,
+                output_directory=output_directory,
+            )
+        )
+
+    return jobs

@@ -83,6 +83,21 @@ To run a single trajectory render do:
 ```bash
 ball_renderer render-trajectory trajectories.h5 0 --config configs/render_debug.yaml --output-directory rendered/debug 
 ```
+or render all trajectories a h5-file:
+```bash
+ball_renderer render-trajectory trajectories.h5 --all --workers 2 --threads-per-blender 4 --resume --config configs/render_debug.yaml --output-directory rendered/debug
+```
+
+There is the option to use multiple `workers`. But note that `BLENDER_EEVEE_NEXT`, the default engine, already uses the graphics device selected by Blender/driver configuration. It does not behave like a CPU workload where 32 workers necessarily means 32 times more throughput.
+
+With one GPU:
+* `--workers 1` may already saturate it;
+* `--workers 2` can hide CPU setup and PNG-writing latency;
+* `--workers 3` may improve throughput further;
+* too many workers will compete for GPU memory, disk bandwidth and shader resources.
+
+Practical reports of multiple EEVEE instances show good improvement initially, followed by flattening or regression as instance count rises.
+
 
 ## HDF5 layout
 

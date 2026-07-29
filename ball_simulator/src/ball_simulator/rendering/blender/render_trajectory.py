@@ -777,6 +777,17 @@ def main() -> None:
         print("[WARN] Depth requested but not implemented in baseline patch; RGB/segmentation are rendered.")
     write_sidecar(job, states, output_root)
     make_preview(job, output_root)
+    success_marker = output_root / " _SUCCESS"
+    success_marker.write_text(
+        json.dumps(
+            {
+                "trajectory_id": job["trajectory_id"],
+                "frame_count": int(len(states["time"])),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
     print(f"[OK] Rendered {job['trajectory_id']} to {output_root}")
 
 
