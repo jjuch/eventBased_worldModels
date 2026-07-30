@@ -4,7 +4,7 @@ This folder can be used to store official stable LeWorldModel as given by https:
 A fork exists on https://github.com/jjuch/le-wm.git, and more specifically on the branch `ball-temporal-jepa`.
 
 ## Install
-To install the exact version of the clone use:
+To install the exact version of the clone, use:
 ```bash
 git clone --recurse-submodules \
   https://github.com/jjuch/eventBased_worldModels.git
@@ -12,6 +12,10 @@ git clone --recurse-submodules \
 or
 ```bash
 git submodule update --init --recursive
+```
+Afterwards, install the editable version of the submodule:
+```bash
+pip install -e external/le-wm
 ```
 
 Below I have added for reference how to add the submodule. But this is not necessary to clone this repository.
