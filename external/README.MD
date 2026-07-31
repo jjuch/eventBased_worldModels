@@ -17,6 +17,7 @@ Afterwards, install the editable version of the submodule:
 ```bash
 pip install -e external/le-wm
 ```
+Note that you need to have `swig` installed and on your path.
 
 Below I have added for reference how to add the submodule. But this is not necessary to clone this repository.
 
