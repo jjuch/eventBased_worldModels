@@ -20,6 +20,30 @@ pip install -e external/le-wm
 
 Below I have added for reference how to add the submodule. But this is not necessary to clone this repository.
 
+## Push update of external library
+Push to the fork first:
+```bash
+cd external/le-wm
+
+git switch ball-temporal-jepa
+git add .
+git commit -m "Package reusable LeWorldModel core"
+git push origin ball-temporal-jepa
+```
+
+Then update the parent repository's pinned submodule commit:
+```bash
+cd ../..
+
+git submodule update \
+    --remote \
+    external/le-wm
+
+git add external/le-wm
+git commit -m "Update pinned LeWorldModel dependency"
+git push
+```
+
 ## First install - for reference
 ### Add local clone
 Configure the local clone:

@@ -23,7 +23,7 @@ Contact evaluation mutates tangential-memory state.This is valid for the current
 cd ball_simulator
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[world-model,dev]"
 ```
 
 ## Generate trajectories
@@ -97,6 +97,27 @@ With one GPU:
 * too many workers will compete for GPU memory, disk bandwidth and shader resources.
 
 Practical reports of multiple EEVEE instances show good improvement initially, followed by flattening or regression as instance count rises.
+
+## Train model
+### Preparing the dataset
+Create a manifest using the configs in `ubox_temporal.yaml`:
+```bash
+ball_world_model build-manifest \
+  -c ball_simulator/src/ball_world_model/configs/data/ubox_temporal.yaml
+```
+Then the data in the config can be validated:
+```bash
+ball_world_model validate-data \
+  ball_simulator/rendered/training/manifest.parquet
+```
+A final check can be done by creating an inspection figure:
+```bash
+ball_world_model inspect-data \
+  -c ball_simulator/src/ball_world_model/configs/data/ubox_temporal.yaml \
+  -m ball_simulator/rendered/training/manifest.parquet \
+  -o inspection/data_batch.png
+```
+
 
 
 ## HDF5 layout
