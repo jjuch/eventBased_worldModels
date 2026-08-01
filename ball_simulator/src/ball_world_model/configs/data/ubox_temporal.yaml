@@ -1,10 +1,10 @@
-root: ball_simulator/rendered/training
-manifest_path: ball_simulator/rendered/training/manifest.parquet
+root: local_experiments/small_batch/rendered/training
+manifest_path: local_experiments/small_batch/rendered/training/manifest.parquet
 require_succes_marker: true
 
 image:
-  width: 128
-  height: 128
+  width: 256
+  height: 256
   channels: 3
   normalization: imagenet
 

@@ -76,7 +76,8 @@ def save_batch_inspection(
     start_frame = int(batch["start_frame"][batch_index])
     figure.suptitle(f"Trajectory {trajectory_id}, start frame {start_frame}", fontsize=15)
     figure.savefig(output, dpi=160, bbox_inches="tight")
-    plt.close(figure)
+    plt.show()
+    # plt.close(figure)
     return output
 
 

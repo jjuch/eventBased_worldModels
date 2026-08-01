@@ -42,7 +42,7 @@ class TrajectorySummary:
     maximum_simultaneous_contacts: int
     simultaneous_contact_samples: int
     contacted_surfaces: tuple[int, ...]
-    surface_epsiode_counts: tuple[int, ...]
+    surface_episode_counts: tuple[int, ...]
     has_sticking: bool
     has_sliding: bool
     maximum_penetration: float
@@ -181,7 +181,7 @@ def summarize_dataset(
                     maximum_simultaneous_contacts=int(np.max(active_contact_count, initial=0)),
                     simultaneous_contact_samples=int(np.count_nonzero(active_contact_count >= 2)),
                     contacted_surfaces=contacted_surfaces,
-                    surface_epsiode_counts=surface_episode_counts,
+                    surface_episode_counts=surface_episode_counts,
                     has_sticking=has_sticking,
                     has_sliding=has_sliding,
                     maximum_penetration=float(np.max(penetration, initial=0.0)),

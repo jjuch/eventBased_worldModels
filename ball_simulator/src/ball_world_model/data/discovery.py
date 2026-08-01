@@ -35,6 +35,7 @@ class TrajectoryValidation:
 
 def discover_trajectory_directories(root: Path | str) -> list[Path]:
     root = Path(root)
+    print("root: ", root)
     if not root.is_dir():
         raise FileNotFoundError(f"Rendered dataset root does not exist: {root}")
     directories = [
@@ -46,8 +47,9 @@ def discover_trajectory_directories(root: Path | str) -> list[Path]:
 
 def _numbered_rgb_paths(rgb_directory: Path) -> list[Path]:
     paths = sorted(rgb_directory.glob("*.png"))
-    expected = [f"{index:06d}" for index in range(len(paths))]
+    expected = [f"{index:06d}.png" for index in range(len(paths))]
     actual = [path.name for path in paths]
+
     if actual != expected:
         raise ValueError(
             f"RGB frames in {rgb_directory} are missing, duplicated, or not numbered contiguously from 000000.png."
@@ -68,7 +70,8 @@ def validate_trajectory(
     rgb_directory = trajectory_directory / "rgb"
     states_path = trajectory_directory / "states.npz"
     metadata_path = trajectory_directory / "metadata.json"
-    success_path = trajectory_directory / "_SUCCESS"
+    success_path = trajectory_directory / " _SUCCESS"
+
 
     if not rgb_directory.is_dir():
         raise FileNotFoundError(f"Missing RGB directory: {rgb_directory}")

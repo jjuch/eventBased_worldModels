@@ -10,7 +10,8 @@ from pydantic import BaseModel, Field, model_validator
 class ImageConfig(BaseModel):
     width: int = Field(default=128, ge=32)
     height: int = Field(default=128, ge=32)
-    channels: Literal["imagenet", "unit"] = "imagenet"
+    channels: Literal[3] = 3
+    normalization: Literal["imagenet", "unit"] = "imagenet"
 
 
 class TemporalConfig(BaseModel):

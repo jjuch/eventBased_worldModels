@@ -1,11 +1,11 @@
 width: 1024
 height: 1024
-fps: 50
+fps: 100
 engine: BLENDER_EEVEE_NEXT
 samples: 64
 transparent_background: false
 source: high_rate
-frame_dt: 0.02
+frame_dt: 0.01
 fixed_visual_y_extent: 4.0
 wall_thickness: 0.001
 camera:

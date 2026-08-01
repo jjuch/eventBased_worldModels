@@ -80,7 +80,7 @@ simulation:
   wall_point: [0.0, 0.0, 0.0]
   wall_normal: [1.0, 0.0, 0.0]
 dataset:
-  trajectories: 100
+  trajectories: 20
   seed: 42
   output: trajectories.h5
   compression: gzip

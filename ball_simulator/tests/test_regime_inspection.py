@@ -36,7 +36,7 @@ def make_summary(index: int) -> TrajectorySummary:
         maximum_simultaneous_contacts=x,
         simultaneous_contact_samples=x,
         contacted_surfaces=(x-1, x),
-        surface_epsiode_counts=(x-1, x),
+        surface_episode_counts=(x-1, x),
         has_sticking=index % 2 == 0, 
         has_sliding=index % 2 == 1,
         maximum_penetration=1e-4*x, 

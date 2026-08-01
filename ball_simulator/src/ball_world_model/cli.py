@@ -78,14 +78,16 @@ def validate_data_command(
     ] = True,
 ) -> None:
     manifest = load_manifest(manifest_path)
-    for row in typer.progressbar(
+
+    with typer.progressbar(
         manifest.to_dict(orient="records"),
         label="Validating trajectories",
-    ):
-        validate_trajectory(
-            row["trajectory_directory"],
-            require_success_marker=require_success_marker,
-        )
+    ) as progress:
+        for row in progress:
+            validate_trajectory(
+                row["trajectory_directory"],
+                require_success_marker=require_success_marker,
+            )
     print(f"[green]Validated {len(manifest):,} trajectories.[/green]")
 
 

@@ -34,12 +34,6 @@ def render_trajectory_command(
             readable=True,
         ),
     ],
-    trajectory_id: Annotated[
-        str | None, 
-        typer.Argument(
-            help="Trajectory ID. Omit when using --all.",
-        ),
-    ],
     config: Annotated[
         Path, 
         typer.Option(
@@ -56,6 +50,12 @@ def render_trajectory_command(
             "-o",
         ),
     ] = Path("rendered"),
+    trajectory_id: Annotated[
+        str | None, 
+        typer.Argument(
+            help="Trajectory ID. Omit when using --all.",
+        ),
+    ] = None,
     render_all: Annotated[
         bool,
         typer.Option(
