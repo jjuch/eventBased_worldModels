@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 from ball_world_model.config import DataConfig
 from .manifest import load_manifest
 from .transforms import FrameTransform
+from .discovery import animation_frame_paths
 
 @dataclass(frozen=True, slots=True)
 class WindowIndex:
@@ -99,9 +100,22 @@ class RenderedTrajectoryDataset(Dataset[dict[str, object]]):
 
 
     def _load_images(self, rgb_directory: Path, indices: np.ndarray) -> torch.Tensor:
+        frame_paths = animation_frame_paths(rgb_directory)
+
         images = []
         for index in indices:
-            path = rgb_directory / f"{int(index):06d}.png"
+            # Dataset indices are zero-based.
+            # Blender animation frame numbers are one-based.
+            zero_based_index = int(index)
+
+            if zero_based_index >= len(frame_paths):
+                raise IndexError(
+                    f"Requested frame{zero_based_index}, "
+                    f"but {rgb_directory} contains only "
+                    f"{len(frame_paths)} frames."
+                )
+
+            path = frame_paths[zero_based_index]
             with Image.open(path) as image:
                 images.append(self.frame_transform(image))
         return torch.stack(images, dim=0)

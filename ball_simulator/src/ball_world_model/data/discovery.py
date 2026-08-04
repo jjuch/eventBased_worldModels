@@ -8,7 +8,12 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-TRAJECTORY_PATTERN = re.compile(r"^trajectory_(\d{8})$")
+TRAJECTORY_PATTERN = re.compile(
+    r"^trajectory_(\d{8})$"
+)
+ANIMATION_FRAME_PATTERN = re.compile(
+    r"^frame_(\d+)\.png$"
+)
 REQUIRED_STATE_FIELDS = (
     "time",
     "position",
@@ -46,15 +51,39 @@ def discover_trajectory_directories(root: Path | str) -> list[Path]:
 
 
 def _numbered_rgb_paths(rgb_directory: Path) -> list[Path]:
-    paths = sorted(rgb_directory.glob("*.png"))
-    expected = [f"{index:06d}.png" for index in range(len(paths))]
-    actual = [path.name for path in paths]
+    indexed_paths: list[tuple[int, Path]] = []
 
-    if actual != expected:
+    for path in rgb_directory.glob("frame_*.png"):
+        match = ANIMATION_FRAME_PATTERN.fullmatch(path.name)
+        if match is None:
+            continue
+
+        frame_number = int(match.group(1))
+        indexed_paths.append((frame_number, path))
+
+    indexed_paths.sort(key=lambda item: item[0])
+
+    if not indexed_paths:
+        return []
+
+    actual_numbers = [
+        frame_number
+        for frame_number, _ in indexed_paths
+    ]
+    expected_numbers = list(
+        range(1, len(indexed_paths) + 1)
+    )
+
+    if actual_numbers != expected_numbers:
         raise ValueError(
-            f"RGB frames in {rgb_directory} are missing, duplicated, or not numbered contiguously from 000000.png."
+            f"RGB frames in {rgb_directory} are missing, duplicated, or not numbered contiguously from frame 1. "
+            f"Expected {expected_numbers[0]} through {expected_numbers[-1]}, " 
+            f"received {actual_numbers[0]} through {actual_numbers[-1]}."
         )
-    return paths
+    return [
+        path
+        for _, path in indexed_paths
+    ]
 
 
 def validate_trajectory(
@@ -145,4 +174,10 @@ def validate_trajectory(
         fps=fps,
         duration=duration,
         environment_kind=environment_kind,
+    )
+
+
+def animation_frame_paths(frame_directory: str | Path) -> list:
+    return _numbered_rgb_paths(
+        Path(frame_directory)
     )

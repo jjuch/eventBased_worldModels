@@ -30,11 +30,12 @@ environment:
   checkerboard_enabled: true
   checker_size: 0.25
   checker_contrast: 0.20
+  floor_margin: 0.08
 ball:
   base_color: [0.78, 0.80, 0.84, 1.0]
   roughness: 0.42
   markers_enabled: true
-  marker_angular_radius_degrees: 13.0
+  marker_angular_radius_degree: 13.0
   marker_surface_offset: 0.003
 outputs:
   rgb: true
