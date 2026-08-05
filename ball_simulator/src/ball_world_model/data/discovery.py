@@ -99,7 +99,7 @@ def validate_trajectory(
     rgb_directory = trajectory_directory / "rgb"
     states_path = trajectory_directory / "states.npz"
     metadata_path = trajectory_directory / "metadata.json"
-    success_path = trajectory_directory / " _SUCCESS"
+    success_path = trajectory_directory / "_SUCCESS"
 
 
     if not rgb_directory.is_dir():

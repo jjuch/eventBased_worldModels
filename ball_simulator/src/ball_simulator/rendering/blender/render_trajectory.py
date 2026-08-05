@@ -7,7 +7,7 @@ import math
 import subprocess
 import sys
 from pathlib import Path
-import shutils
+import shutil
 from dataclasses import dataclass
 from typing import Sequence
 
@@ -505,48 +505,73 @@ def configure_rgb_and_segmentation_outputs(
     The semantic output is generated from the Object Index pass,
     so no material replacement or second render is required.
     """
-    scene.use_nodes = True
     view_layer = scene.view_layers[0]
     view_layer.use_pass_object_index = write_segmentation
 
-    tree = scene.node_tree
+    old_tree = scene.compositing_node_group
+
+    tree = bpy.data.node_groups.new(
+        name=f"BallRendererCompositor_{scene.name}",
+        type="CompositorNodeTree",
+    )
+    scene.compositing_node_group = tree
+
+    if (
+        old_tree is not None
+        and old_tree.users == 0
+    ):
+        bpy.data.node_groups.remove(old_tree)
+
     nodes = tree.nodes
     links = tree.links
 
     nodes.clear()
 
+    tree.interface.new_socket(
+        name="Image",
+        in_out="OUTPUT",
+        socket_type="NodeSocketColor",
+    )
+
     render_layers = compositor_node(
         nodes,
         "CompositorNodeRLayers",
         "Render Layers",
-        (-800, 100),
+        (-900, 200),
     )
     render_layers.layer = view_layer.name
 
-    # Keep a Composite  output so Blender has a normal final image
-    composite = compositor_node(
+    group_output = compositor_node(
         nodes,
-        "CompositorNodeComposite",
-        "Composite",
-        (750, 300),
+        "NodeGroupOutput",
+        "Group Output",
+        (900, 350),
     )
+    group_output.is_active_output = True
+
     links.new(
-        render_layers.output["Image"],
-        composite.inputs["Image"],
+        render_layers.outputs["Image"],
+        group_output.inputs["Image"],
     )
 
     if write_rgb:
+        rgb_directory = output_root / "rgb"
+        rgb_directory.mkdir(parents=True, exist_ok=True)
+
         rgb_output = compositor_node(
             nodes,
             "CompositorNodeOutputFile",
             "RGB Output",
-            (750, 100),
+            (650, 100),
         )
-        rgb_output.base_path = str(output_root / "rgb")
+
+        rgb_output.format.media_type = "IMAGE"
+        rgb_output.directory = str(rgb_directory)
+        rgb_output.file_name = "frame_####"
         rgb_output.format.file_format = "PNG"
         rgb_output.format.color_mode = "RGBA" if scene.render.film_transparent else "RGB"
         rgb_output.format.color_depth = "8"
-        rgb_output.file_slots[0].path = "frame_"
+        rgb_output.use_file_extension = True
 
         links.new(
             render_layers.outputs["Image"],
@@ -555,93 +580,104 @@ def configure_rgb_and_segmentation_outputs(
 
 
     if write_segmentation:
+        segmentation_directory = output_root / "segmentation"
+        segmentation_directory.mkdir(parents=True, exist_ok=True)
+
+        index_socket = render_layers.outputs.get("IndexOB")
+        if index_socket is None:
+            print(
+                "T[WARN] The active Blender render engine does not expose "
+                "the Object Index compositor pass. Segmentation output is disabled."
+            )
+            write_segmentation = False
+            return
+        
         segmentation_output = compositor_node(
             nodes,
             "CompositorNodeOutputFile",
             "Segmentation Output",
-            (750, -220),
+            (900, -250),
         )
-        segmentation_output.base_path = str(output_root / "segmentation")
+        segmentation_output.format.media_type = "IMAGE"
+        segmentation_output.directory = str(segmentation_directory)
+        segmentation_output.file_name= "frame_####"
         segmentation_output.format.file_format = "PNG"
         segmentation_output.format.color_mode = "RGB"
         segmentation_output.format.color_depth = "8"
-        segmentation_output.file_slots[0].path = "frame_"
-
-        index_socket = render_layers.outputs.get("IndexOB")
-        if index_socket is None:
-            raise RuntimeError(
-                "The active Blender render engine does not expose "
-                "the Object Index compositor pass."
-            )
-
+        
         # Start the segmentation image at black
         segmentation_image = None
-        for vertical_index, (class_index, color) in enumerate(
-            sorted(SEMANTIC_COLOR.items())
-        ):
-            if class_index == 0:
-                # Unmatched/background pixels remain black
-                continue
 
-            mask = create_index_mask(
+        semantic_classes = [
+            (class_index, color) for class_index, color
+            in sorted(SEMANTIC_COLOR.items())
+            if class_index != 0
+        ]
+
+        for sequence_index, (class_index, color) in enumerate(semantic_classes):
+            y_position = -100.0 - 220.0 * sequence_index
+
+            mask_socket = create_index_mask(
                 nodes, links, 
                 index_socket=index_socket, 
                 class_index=class_index, 
-                y_position=-100.0 - 180.0 * vertical_index
+                y_position=y_position,
             )
 
             color_node = compositor_node(
                 nodes,
                 "CompositorNodeRGB",
-                f"SemanticColor_{class_index}",
-                (80, -100.0 - 180.0 * vertical_index),
+                f"Semantic Color {class_index}",
+                (0, y_position),
             )
-            color_node.outputs[0].default_value = color
+            color_node.outputs["RGBA"].default_value = (
+                float(color[0]), float(color[1]), float(color[2]), float(color[3])
+            )
 
-            multiply = compositor_node(
+            masked_color = compositor_node(
                 nodes,
                 "CompositorNodeMixRGB",
-                f"MaskColor_{class_index}",
-                (280, -100.0 - 180.0 * vertical_index),
+                f"Mask Semantic Color {class_index}",
+                (220, y_position),
             )
-            multiply.blend_type = "MULTIPLY"
-            multiply.inputs[0].default_value = 1.0
+            masked_color.blend_type = "MULTIPLY"
+            masked_color.inputs[0].default_value = 1.0
 
             links.new(
-                color_node.ouputs[0],
-                multiply.inputs[1],
+                color_node.ouputs["RGBA"],
+                masked_color.inputs[1],
             )
             links.new(
-                mask,
-                multiply.inputs[2],
+                mask_socket,
+                masked_color.inputs[2],
             )
 
             if segmentation_image is None:
-                segmentation_image = multiply.outputs[0]
+                segmentation_image = masked_color.outputs[0]
             else:
-                add = compositor_node(
+                add_node = compositor_node(
                     nodes,
                     "CompositorNodeMixRBG",
-                    f"AddSemantic_{class_index}",
-                    (480, -100.0 - 180.0 * vertical_index),
+                    f"Add Semantic Color {class_index}",
+                    (480, y_position),
                 )
-                add.blend_type = "ADD"
-                add.inputs[0].default_value = 1.0
+                add_node.blend_type = "ADD"
+                add_node.inputs[0].default_value = 1.0
 
                 links.new(
                     segmentation_image,
-                    add.inputs[1],
+                    add_node.inputs[1],
                 )
                 links.new(
-                    multiply.outputs[0],
-                    add.inputs[2],
+                    masked_color.outputs[0],
+                    add_node.inputs[2],
                 )
 
-                segmentation_image = add.outputs[0]
+                segmentation_image = add_node.outputs[0]
 
         if segmentation_image is None:
             raise RuntimeError(
-                "NoSemantic classes were configured."
+                "No non-background semantic classes were configured."
             )
 
         links.new(
@@ -723,10 +759,10 @@ def clean_output_directory(output_root: Path, job: dict) -> None:
     outputs = job["render"]["outputs"]
 
     if outputs["rgb"]:
-        shutils.rmtree(output_root / "rgb", ignore_errors=True)
+        shutil.rmtree(output_root / "rgb", ignore_errors=True)
 
     if outputs["segmentation"]:
-        shutils.rmtree(output_root / "segmentation", ignore_errors=True)
+        shutil.rmtree(output_root / "segmentation", ignore_errors=True)
 
     success_marker = output_root / "_SUCCESS"
     if success_marker.exists():
@@ -1156,16 +1192,42 @@ def animate_ball(scene, ball, states) -> int:
             frame=frame,
             group="Trajectory",
         )
+
+    
     # Simulation samples must not be smoothed between frames.
     # Linear interpolation preserves the supplied resampled states.
-    if (
-        ball.animation_data is not None
-        and ball.animation_data.action is not None
-    ):
-        for fcurve in ball.animation_data.action.fcurves:
-            for keyframe in fcurve.keyframe_points:
-                keyframe.interpolation = "LINEAR" # Avoid Bezier interpolation as it focusses on visually smooth, but not physically correct.
+    # Avoid Bezier interpolation as it focusses on visually smooth, but not physically correct.
 
+    animation_data = ball.animation_data
+    if (
+        animation_data is None
+        or animation_data.action is None
+    ):
+        raise RuntimeError("Blender did not create animation data for the ball.")
+    action = animation_data.action
+
+    for array_index in range(3):
+        fcurve = action.fcurve_ensure_for_datablock(
+            datablock=ball,
+            data_path="location",
+            index=array_index,
+            group_name="Trajectory",
+        )
+
+        for keyframe_point in fcurve.keyframe_points:
+            keyframe_point.interpolation = "LINEAR"
+
+    for array_index in range(4):
+            fcurve = action.fcurve_ensure_for_datablock(
+                datablock=ball,
+                data_path="rotation_quaternion",
+                index=array_index,
+                group_name="Trajectory",
+            )
+    
+            for keyframe_point in fcurve.keyframe_points:
+                keyframe_point.interpolation = "LINEAR"
+    
     scene.frame_start = 1
     scene.frame_end = frame_count
     scene.frame_step = 1
@@ -1223,7 +1285,7 @@ def render_rgb(
 
     # File Output nodes write the actual dataset images.
     # This main filepath is only a harmless fallback.
-    scene.render.filepath = str(output_root / "_render_unused_")
+    scene.render.filepath = str(rgb_dir / "frame_")
 
 
     bpy.ops.render.render(animation=True, write_still=False, use_viewport=False)
@@ -1232,14 +1294,38 @@ def render_rgb(
 
 
 
-def write_sidecar(job: dict, states, output_root: Path):
-    np.savez_compressed(output_root / "states.npz", **{key: states[key] for key in states.files})
+def write_sidecar(job: dict, states: dict[str, np.ndarray], output_root: Path):
+    required_fields = {
+        "time",
+        "position",
+        "quaternion_xyzw",
+        "linear_velocity",
+        "angular_velocity",
+    }
+    missing_fields = required_fields.difference(states)
+
+    if missing_fields:
+        raise ValueError(
+            "Cannot write trajectory sidecar because the "
+            "following state fields are missing: "
+            f"{sorted(missing_fields)}."
+        )
+
+    frame_count = int(len(states["time"]))
+
+    np.savez_compressed(
+        output_root / "states.npz", 
+        **{
+            key: np.asarray(value) 
+            for key, value in states.items()
+        },
+    )
     metadata = {
         "schema_version": job["schema_version"],
         "trajectory_id": job["trajectory_id"],
         "environment": job["environment"],
         "render": job["render"],
-        "frame_count": int(len(states["time"])),
+        "frame_count": frame_count,
         "quaternion_input_order": "xyzw",
         "blender_quaternion_order": "wxyz",
         "segmentation_colors_rgb": {
@@ -1272,7 +1358,7 @@ def make_preview(job: dict, output_root: Path):
 
 def load_job(path: Path) -> dict:
     return json.loads(
-        path.read_text(path.read_text(encoding="utf-8"))
+        path.read_text(encoding="utf-8")
     )
 
 

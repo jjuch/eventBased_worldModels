@@ -46,7 +46,7 @@ class EnvironmentRenderConfig(BaseModel):
     checkerboard_enabled: bool = True
     checker_size: float = Field(default=0.25, gt=0.0)
     checker_contrast: float = Field(default=0.20, ge=0.0, le=1.0)
-    floor_margin: float = Field(defualt=0.08, ge=0.0, description=(
+    floor_margin: float = Field(default=0.08, ge=0.0, description=(
         "Static visual extension of the floor beyong "
         "each vertical channel wall, in meters."
     ),)

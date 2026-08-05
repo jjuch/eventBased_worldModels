@@ -40,6 +40,6 @@ ball:
 outputs:
   rgb: true
   depth: false
-  segmentation: true
+  segmentation: false
   preview_mp4: true
   keep_exr: false

@@ -137,7 +137,7 @@ class BlenderRunner:
                             for job in batch_jobs
                         ],
                     },
-                    ident=2,
+                    indent=2,
                 ),
                 encoding="utf-8",
             )
@@ -165,7 +165,10 @@ class BlenderRunner:
                 threads=threads_per_blender,
                 log_file=log_file,
             )
-            return [RenderResult(job=job, return_code=completed.returncode)]
+            return [
+                RenderResult(job=job, return_code=completed.returncode)
+                for job in batch_jobs
+            ]
 
         results: list[RenderResult] = []
 
@@ -271,7 +274,7 @@ def partition_jobs(jobs: Sequence[Path], workers: int) -> list[list[Path]]:
 
     batches: list[list[Path]] = [
         []
-        for _ in range(len(batch_count))
+        for _ in range(batch_count)
     ]
 
     for index, job in enumerate(jobs):
