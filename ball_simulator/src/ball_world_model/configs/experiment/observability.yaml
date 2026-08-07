@@ -1,0 +1,19 @@
+data_config: src/ball_world_model/configs/data/ubox_temporal.yaml
+
+model:
+  embedding_dim: 384
+  temporal_depth: 4
+  temporal_heads: 6
+  maximum_frames: 32
+  learning_rate: 0.0003
+  weight_decay: 0.05
+  orientation_weight: 1.0
+
+training:
+  output_directory: outputs/observability
+  epochs: 50
+  devices: auto
+  precision: bf16-mixed
+  gradient_clip_norm: 1.0
+  deterministic: true
+  log_every_n_steps: 10

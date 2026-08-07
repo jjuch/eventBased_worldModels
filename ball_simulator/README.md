@@ -119,6 +119,17 @@ ball_world_model inspect-data \
 ```
 
 
+### Train observability
+Train the ten-frame visual state-estimation prerequisite baseline.
+```bash
+ball_world_model train-observability \
+  --config ball_simulator/src/ball_world_model/configs/experiment/observability.yaml
+```
+After training inspect with:
+```bash
+tensorboard --logdir outputs/observability
+```
+
 
 ## HDF5 layout
 
