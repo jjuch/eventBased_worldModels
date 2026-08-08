@@ -8,9 +8,8 @@ class ResidualBlock(nn.Module):
     def __init__(self, channels: int, *, stride: int = 1) -> None:
         """
         Classic ResNet idea: 
-            y = \sigma(F(x) + x)
+            y = sigma(F(x) + x)
         where F(x) learns a correction, skip path preserves information, gradients can flow directly through the identity branch. 
-        
         """
         super().__init__()
         output_channels = channels * 2 if stride == 2 else channels
@@ -60,7 +59,7 @@ class SmallFrameEncoder(nn.Module):
 
     def forward(self, frames: torch.Tensor) -> torch.Tensor:
         """
-        Process a video sequence, by applying the same encoder to each frame.
+        Process a video sequence, by applying the same encoder to each frame. The frames tensor is batch B, time T, color (RGB), height H, width W
 
         Parameters
         ----------

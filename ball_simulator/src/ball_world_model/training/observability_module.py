@@ -119,9 +119,9 @@ class ObservabilityModule(L.LightningModule):
         self._step(batch, "test")
 
 
-    def configure_optimiser(self):
+    def configure_optimizers(self):
         optimiser = torch.optim.AdamW(
-            self.parameter(),
+            self.parameters(),
             lr=self.hparams.learning_rate,
             weight_decay=self.hparams.weight_decay
         )
@@ -130,7 +130,7 @@ class ObservabilityModule(L.LightningModule):
             T_max=max(1, self.trainer.max_epochs),
         )
         return {
-            "optimiser": optimiser,
+            "optimizer": optimiser,
             "lr_scheduler": {
                 "scheduler": scheduler,
                 "interval": "epoch",

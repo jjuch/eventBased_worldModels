@@ -120,7 +120,7 @@ ball_world_model inspect-data \
 
 
 ### Train observability
-Train the ten-frame visual state-estimation prerequisite baseline.
+Train the ten-frame visual state-estimation prerequisite baseline. It tests whether the ball’s position, orientation, linear velocity, and angular velocity can actually be inferred from the rendered video.
 ```bash
 ball_world_model train-observability \
   --config ball_simulator/src/ball_world_model/configs/experiment/observability.yaml
