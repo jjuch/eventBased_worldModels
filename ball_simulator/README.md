@@ -121,15 +121,71 @@ ball_world_model inspect-data \
 
 ### Train observability
 Train the ten-frame visual state-estimation prerequisite baseline. It tests whether the ball’s position, orientation, linear velocity, and angular velocity can actually be inferred from the rendered video.
+
+1. Translation-only dataset
+Use:
+* no collisions during the complete context;
+* zero angular velocity;
+* fixed orientation;
+* initially zero gravity and constant linear velocity;
+* fixed ball radius for the first experiment;
+* oblique fixed camera;
+* checkerboard reference planes with known square size;
+* the ball completely visible in all frames.
+
 ```bash
-ball_world_model train-observability \
-  --config ball_simulator/src/ball_world_model/configs/experiment/observability.yaml
+ball_world_model train-kinematic \
+  -c src/ball_world_model/configs/experiment/translation_observer.yaml
 ```
-After training inspect with:
-```bash
-tensorboard --logdir outputs/observability
+Important TensorBoard metrics:
+```text
+validation/position_rmse_m
+validation/velocity_rmse_mps
+validation/translation_consistency_m
 ```
 
+2. Rotation-only dataset
+Use:
+* fixed ball center;
+* zero linear velocity;
+* zero gravity;
+* constant random angular velocity;
+* random initial orientation;
+* four unique tetrahedral markers;
+* a large apparent ball diameter in the 256x256 model input.
+
+```bash
+ball_world_model train-kinematic \
+  -c src/ball_world_model/configs/experiment/rotation_observer.yaml
+```
+Important metrics:
+```text
+validation/orientation_deg
+validation/omega_rmse_radps
+validation/rotation_consistency_deg
+```
+
+3. Combined dataset
+Use translation and rotation together, still without contact. Add gravity only after the zero-gravity combined experiment succeeds.
+Update the `root` and `manifest_path` fields in the three data YAML files if your actual locations differ.
+
+```bash
+ball_world_model train-kinematic \
+  -c src/ball_world_model/configs/experiment/combined_observer.yaml
+```
+Open TensorBoard with:
+```bash
+tensorboard --logdir outputs
+```
+
+#### Geometric bias used by this patch
+The observer predicts a six-dimensional continuous rotation representation and maps it to a valid rotation matrix. Orientation is evaluated intrinsically on SO(3). It also predicts a state at every context frame. Adjacent predictions are regularized using:
+```text
+p[t+1] approximately p[t] + dt * v[t]
+R[t+1] approximately Exp(dt * omega[t]) @ R[t]
+```
+The second convention matches the current simulator's world-coordinate angular velocity. If that simulator convention changes, set `world_angular_velocity: false` in the experiment YAML.
+The consistency losses are intentionally soft, with weight `0.1`. The model remains free to fit rendering and numerical imperfections. This is not a hard TSE(3) architecture.
 
 ## HDF5 layout
 

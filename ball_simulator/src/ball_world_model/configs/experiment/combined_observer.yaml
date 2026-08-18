@@ -1,0 +1,21 @@
+data_config: ball_simulator/src/ball_world_model/configs/data/combined_free_flight.yaml
+model:
+  task: combined
+  embedding_dim: 256
+  temporal_depth: 4
+  keypoints: 8
+  dropout: 0.0
+  learning_rate: 0.0003
+  weight_decay: 0.05
+  state_weight: 1.0
+  translation_consistency_weight: 0.1
+  rotation_consistency_weight: 0.1
+  world_angular_velocity: true
+training:
+  output_directory: outputs/combined_observer
+  epochs: 100
+  devices: auto
+  precision: bf16-mixed
+  gradient_clip_norm: 1.0
+  deterministic: true
+  log_every_n_steps: 10
