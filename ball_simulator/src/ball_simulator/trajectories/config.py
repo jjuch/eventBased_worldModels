@@ -48,34 +48,13 @@ class InitialStateRanges(BaseModel):
 
 class UBoxInitialStateRanges(BaseModel):
     """Initial state ranges for a U-box environment."""
-    x_fraction: Range = Range(
-        low=0.25,
-        high=0.75,
-    )
-    x_speed: Range = Range(
-        low=1.0,
-        high=5.0,
-    )
-    y_speed: Range = Range(
-        low=-1.5,
-        high=1.5,
-    )
-    z_speed: Range = Range(
-        low=-1.0,
-        high=2.0,
-    )
-    height: Range = Range(
-        low=0.30,
-        high=1.50,
-    )
-    lateral_position: Range = Range(
-        low=-0.50,
-        high=0.50,
-    )
-    spin: Range = Range(
-        low=-60.0,
-        high=60.0,
-    )
+    x_fraction: Range = Range(low=0.25, high=0.75)
+    x_speed: Range = Range(low=1.0, high=5.0)
+    y_speed: Range = Range(low=-1.5, high=1.5)
+    z_speed: Range = Range(low=-1.0, high=2.0)
+    height: Range = Range(low=0.30, high=1.50)
+    lateral_position: Range = Range(low=-0.50, high=0.50)
+    spin: Range = Range(low=-60.0, high=60.0)
     initial_horizontal_direction: Literal[
         "left",
         "right",
@@ -199,17 +178,70 @@ class UBoxEnvironmentConfig(BaseModel):
 
         return self
 
+
+class FreeFlightInitialStateRanges(BaseModel):
+    """Controlled collision-free kinematic experiments."""
+    mode: Literal["translation", "rotation", "combined"] = "translation"
+    x_position: Range = Range(low=-0.75, high=0.75)
+    y_position: Range = Range(low=-0.75, high=0.75)
+    z_position: Range = Range(low=0.20, high=1.50)
+    x_speed: Range = Range(low=-1.50, high=1.50)
+    y_speed: Range = Range(low=-1.50, high=1.50)
+    z_speed: Range = Range(low=-1.00, high=1.00)
+    spin: Range = Range(low=-30.0, high=30.0)
+    fixed_position: tuple[float, float, float] = (0.0, 0.0, 0.80)
+    safety_margin: float = Field(default=0.20, ge=0.0)
+    maximum_sampling_attempts: int = Field(default=1_000, ge=1)
+
+
+class FreeFlightEnvironmentConfig(BaseModel):
+    """
+    Three distant checkerboard reference planes.
+
+    The planes are physical surfaces for metadata compatibility, but the initial-state sampler analytically guarantees that the sphere remains separated from every plane.
+    """
+
+    side_plane: PlaneConfig = PlaneConfig(
+        surface_id="side_reference",
+        point=(-3.0, 0.0, 0.0),
+        normal=(1.0, 0.0, 0.0),
+    )
+    rear_plane: PlaneConfig = PlaneConfig(
+        surface_id="rear_reference",
+        point=(0.0, 3.0, 0.0),
+        normal=(0.0, -1.0, 0.0),
+    )
+    floor: PlaneConfig = PlaneConfig(
+        surface_id="floor_reference",
+        point=(0.0, 0.0, -2.0),
+        normal=(0.0, 0.0, 1.0),
+    )
+
+    @model_validator(mode="after")
+    def unique_surface_ids(self) -> "FreeFlightEnvironmentConfig":
+        ids = {
+            self.side_plane.surface_id,
+            self.rear_plane.surface_id,
+            self.floor.surface_id,
+        }
+        if len(ids) != 3:
+            raise ValueError("Every free-flight reference plane needs a unique surface_id.")
+        return self
+
+
 class EnvironmentsConfig(BaseModel):
     single_wall: SingleWallEnvironmentConfig = (
         SingleWallEnvironmentConfig()
     )
     u_box: UBoxEnvironmentConfig = UBoxEnvironmentConfig()
+    free_flight: FreeFlightEnvironmentConfig = FreeFlightEnvironmentConfig()
 
 
 class ExperimentConfig(BaseModel):
     default_environment: Literal[
         "single-wall",
         "u-box",
+        "free-flight",
     ] = "single-wall"
 
     environments: EnvironmentsConfig = EnvironmentsConfig()
@@ -217,8 +249,11 @@ class ExperimentConfig(BaseModel):
     physics: PhysicsRanges = PhysicsRanges()
     initial_state: InitialStateRanges = InitialStateRanges()
     u_box_initial_state: UBoxInitialStateRanges = (
-    UBoxInitialStateRanges()
-)
+        UBoxInitialStateRanges()
+    )
+    free_flight_initial_state: FreeFlightInitialStateRanges = (
+        FreeFlightInitialStateRanges()
+    )
     simulation: SimulationConfig = SimulationConfig()
     dataset: DatasetConfig = DatasetConfig()
 

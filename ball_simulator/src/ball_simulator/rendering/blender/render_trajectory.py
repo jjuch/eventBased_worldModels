@@ -872,7 +872,11 @@ def build_environment(job: dict):
     show_grid = float(environment_render["show_near_wall_grid"])
     floor_margin = float(environment_render["floor_margin"])
 
+    environment_kind = str(job["environment"].get("kind", ""))
+    is_free_flight = environment_kind == "free-flight"
     channel_width = float(job["environment"].get("channel_width") or 2.0)
+    visual_x_center = 0.0 if is_free_flight else channel_width / 2.0
+    visual_x_length = 2.0 * visual_y_extent if is_free_flight else channel_width
     surfaces = {s["surface_id"]: s for s in job["environment"]["surfaces"]}
     camera_location = np.asarray(
             render["camera"]["location"], dtype=float
@@ -887,9 +891,21 @@ def build_environment(job: dict):
     y_length = 2.0 * visual_y_extent
     wall_height = 2.0
     wall_cell_counts = (1.0, max(1.0, y_length / checker_size), max(1.0, wall_height / checker_size)) 
-    floor_cell_counts = (max(1.0, channel_width / checker_size), max(1.0, y_length / checker_size), 1.0)
+    floor_cell_counts = (max(1.0, visual_x_length / checker_size), max(1.0, y_length / checker_size), 1.0)
+    rear_cell_counts = (
+        max(1.0, visual_x_length / checker_size),
+        1.0,
+        max(1.0, 2.0 * wall_height / checker_size),
+    )
 
-    opaque_wall_material = checkerboard_material("WallCheckerBoar", (0.27, 0.24, 0.43, 1.0),contrast=checker_contrast, cell_counts=wall_cell_counts, roughness=0.72)
+    opaque_wall_material = checkerboard_material("WallCheckerBoard", (0.27, 0.24, 0.43, 1.0), contrast=checker_contrast, cell_counts=wall_cell_counts, roughness=0.72)
+    rear_wall_material = checkerboard_material(
+        "RearWallCheckerBoard",
+        (0.24, 0.31, 0.38, 1.0),
+        contrast=checker_contrast,
+        cell_counts=rear_cell_counts,
+        roughness=0.72,
+    )
     floor_material = checkerboard_material(name="FloorCheckerBoard",
                                            base_color=(0.28, 0.24, 0.20, 1.0), contrast=checker_contrast, cell_counts=floor_cell_counts, roughness=0.82)
     alpha = render["environment"]["near_wall_alpha"]
@@ -944,11 +960,28 @@ def build_environment(job: dict):
                         frame_material=boundary_material,
                     )
                 )
+        elif dominant_axis == 1: # rear y reference plane
+            plane_y = float(point[1])
+            location = (
+                visual_x_center,
+                plane_y - normal[1] * wall_thickness / 2.0,
+                0.0,
+            )
+            scale = (visual_x_length, wall_thickness, 2.0 * wall_height)
+            visual_objects.append(
+                cube(
+                    name=surface_id,
+                    location=location,
+                    scale=scale,
+                    mat=rear_wall_material,
+                    pass_index=pass_index
+                )
+            )
         elif dominant_axis == 2:  # floor
             floor_z = float(point[2])
-            location = (channel_width / 2.0, 0.0,
+            location = (visual_x_center, 0.0,
                         floor_z - normal[2] * wall_thickness / 2.0)
-            scale = (channel_width + 2.0 * floor_margin,
+            scale = (visual_x_length + 2.0 * floor_margin,
                      y_length, wall_thickness)
 
             visual_objects.append(

@@ -11,6 +11,7 @@ from .config import (
     PlaneConfig,
     SingleWallEnvironmentConfig,
     UBoxEnvironmentConfig,
+    FreeFlightEnvironmentConfig,
 )
 from .physics import CompliantPlaneContact, ForceModel
 
@@ -18,6 +19,7 @@ from .physics import CompliantPlaneContact, ForceModel
 class EnvironmentKind(str, Enum):
     SINGLE_WALL = "single-wall"
     U_BOX = "u-box"
+    FREE_FLIGHT = "free-flight"
 
 @dataclass(frozen=True, slots=True)
 class PlaneSurface:
@@ -141,8 +143,37 @@ class UBoxEnvironment(SimulationEnvironment):
                 for surface in self._surfaces
             },
         }
-    
 
+
+class FreeFlightEnvironment(SimulationEnvironment):
+    def __init__(self, config: FreeFlightEnvironmentConfig) -> None:
+        self.config = config
+        self._surfaces = tuple(
+            PlaneSurface.from_config(plane)
+            for plane in (config.side_plane, config.rear_plane, config.floor)
+        )
+
+    @property
+    def kind(self) -> EnvironmentKind:
+        return EnvironmentKind.FREE_FLIGHT
+
+    @property
+    def surfaces(self) -> tuple[PlaneSurface, ...]:
+        return self._surfaces
+
+    def metadata(self) -> dict[str, object]:
+        return {
+            "kind": self.kind.value,
+            "surfaces": {
+                surface.surface_id: {
+                    "point": surface.point.tolist(),
+                    "normal": surface.normal.tolist(),
+                }
+                for surface in self._surfaces
+            },
+        }
+    
+    
 class EnvironmentFactory:
     @staticmethod
     def create(
@@ -157,6 +188,11 @@ class EnvironmentFactory:
         if kind is EnvironmentKind.U_BOX:
             return UBoxEnvironment(
                 config.environments.u_box
+            )
+
+        if kind is EnvironmentKind.FREE_FLIGHT:
+            return FreeFlightEnvironment(
+                config.environments.free_flight
             )
 
         raise ValueError(

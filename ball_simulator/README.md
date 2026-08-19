@@ -33,6 +33,11 @@ python -m pip install -e ".[world-model,dev]"
 ball_simulator validate-config configs/poc.yaml
 ball_simulator generate configs/poc.yaml --environment single-wall --output single_wall.h5 --workers 0
 ball_simulator generate configs/poc.yaml --environment u-box --output u_box.h5 --workers 0
+ball\_simulator generate \\
+  configs/kinematic/translation_free_flight.yaml \\
+  --environment free-flight \\
+  --output data/translation_free_flight.h5 \\
+  --workers 0
 pytest -q
 ```
 
@@ -77,6 +82,37 @@ ball_renderer blender-info
 ffmpeg -version
 ```
 This will show you the version and the path. If it isn't on the path you can use `--blender-executable` followed by the absolute path to blender, but it is preferred to have it installed on the path.
+
+### Assign an optimal camera viewpoint
+Based on a dataset an optimal camera viewpoint can be automatically assigned. This will ensure that the ball is clearly visible for all trajectories.
+```bash
+ball\_renderer propose-camera \\
+  data/translation_free_flight.h5 \\
+  --config configs/kinematic/render_translation.yaml \\
+  --output configs/kinematic/render_translation_optimised.yaml \\
+  --report inspection/translation_camera.json \\
+  --minimum-diameter-px 35 \\
+  --target-diameter-px 70
+```
+
+`propose-camera` searches a deterministic grid of:
+```text
+azimuth
+elevation
+distance
+focal length
+```
+Every candidate projects sampled sphere centers and radii from the complete HDF5 dataset. Candidates are rejected when:
+ * any sphere lies behind the camera;
+ * any sphere silhouette violates the image margin;
+ * the minimum apparent diameter is below the requested threshold.
+Surviving candidates are scored using:
+ * closeness to the target apparent diameter;
+ * image margin;
+ * conditioning of the map from world `(x, y, z)` to image `(u, v, log diameter)`.
+
+The routine writes the selected `location`, `target`, and `focal_length_mm` into a copied render YAML. The original render YAML remains unchanged. Camera selection is fixed per dataset, never per trajectory, so framing cannot leak state into the model.This is a proposal routine, not a claim of continuous global optimality. It selects the best camera within a broad deterministic candidate sweep and records the complete score report.
+Always render and visually inspect several representative trajectories before launching the full render.
 
 ### Render a single path
 To run a single trajectory render do:

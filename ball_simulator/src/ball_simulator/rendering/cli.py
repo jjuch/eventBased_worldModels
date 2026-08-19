@@ -11,6 +11,7 @@ import numpy as np
 from .config import RenderConfig
 from .jobs import prepare_render_job, prepare_all_render_jobs
 from .runner import BlenderRunner
+from .camera_optimiser import optimise_camera, write_optimised_reder_config
 
 app = typer.Typer(help="Render physically rich sphere-wall trajectories.")
 
@@ -22,6 +23,52 @@ def blender_info(
     print(f"[green]Blender:[/green] {runner.executable}")
     print(f"[green]Version:[/green] {runner.version()}")
 
+
+@app.command("propose-camera")
+def propose_camera_command(
+    dataset: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True),
+    ],
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", exists=True, readable=True),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o"),
+    ],
+    report: Annotated[
+        Path | None,
+        typer.Option("--report"),
+    ] = None,
+    minimum_diameter_px: Annotated[
+        float,
+        typer.Option("--minimum-diameter-px", min=1.0),
+    ] = 35.0,
+    target_diameter_px: Annotated[
+        float,
+        typer.Option("--target-diameter-px", min=1.0),
+    ] = 70.0,
+) -> None:
+    """Propose one fixed camera for the complete dataset and write a render YAML."""
+    render_config = RenderConfig.from_yaml(config)
+    candidate = optimise_camera(
+        dataset,
+        render_config,
+        minimum_diameter_px=minimum_diameter_px,
+        target_diameter_px=target_diameter_px,
+    )
+    saved = write_optimised_reder_config(config, output, candidate, report)
+    print(f"[green]Saved optimized render config:[/green] {saved.resolve()}")
+    print(f"  camera location: {candidate.location.tolist()}")
+    print(f"  camera target: {candidate.target.tolist()}")
+    print(f"  focal length: {candidate.focal_length_mm:.1f} mm")
+    print(f"  minimum ball diameter: {candidate.minimum_diameter_px:.1f} px")
+    print(f"  median ball diameter: {candidate.median_diameter_px:.1f} px")
+    print(f"  minimum image margin: {candidate.minimum_margin_px:.1f} px")
+    print(f"  projection conditioning: {candidate.conditioning:.5f}")
+    
 
 @app.command("render-trajectory")
 def render_trajectory_command(
