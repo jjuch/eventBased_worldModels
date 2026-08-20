@@ -41,9 +41,17 @@ world-model = [
 ball_simulator = "ball_simulator.trajectories.cli:app"
 ball_renderer = "ball_simulator.rendering.cli:app"
 ball_world_model = "ball_world_model.cli:app"
+ball_project = "ball_project.cli:app"
+create_world_model = "ball_project.cli:create_entrypoint"
+run_experiment = "ball_project.cli:run_entrypoint"
+
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/ball_simulator"]
+packages = [
+  "src/ball_simulator",
+  "src/ball_world_model",
+  "src/ball_project",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src"]
