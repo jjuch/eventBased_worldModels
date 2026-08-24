@@ -28,13 +28,13 @@ def inspect_status(context: ProjectContext) -> ProjectStatus:
             trajectory_count = None
     rendered = context.resolve(context.manifest.paths.rendered)
     rendered_complete = sum(1 for path in rendered.glob("trajectory_*/_SUCCESS"))
-    optimized = context.resolve(context.manifest.configs.optimized_rendering)
+    optimised = context.resolve(context.manifest.configs.optimised_rendering)
     manifest = context.resolve(context.manifest.paths.manifest)
     training = context.resolve(context.manifest.paths.training_outputs)
     runs = len(list(training.glob("**/checkpoints/*.ckpt"))) if training.exists() else 0
     return ProjectStatus(
         trajectories=trajectory_count,
-        camera_ready=optimized.is_file(),
+        camera_ready=optimised.is_file(),
         rendered_complete=rendered_complete,
         manifest_ready=manifest.is_file(),
         training_runs=runs,

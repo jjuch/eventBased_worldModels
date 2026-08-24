@@ -33,7 +33,7 @@ def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
         "--config",
         str(context.resolve(context.manifest.configs.rendering)),
         "--output",
-        str(context.resolve(context.manifest.configs.optimized_rendering)),
+        str(context.resolve(context.manifest.configs.optimised_rendering)),
         "--report",
         str(context.resolve(context.manifest.paths.camera_report)),
     ]
