@@ -13,7 +13,7 @@ def choose_editor(explicit: str | None) -> list[str]:
     if candidate:
         return shlex.split(candidate, posix=sys.platform != "win32")
     
-    fallbacks = ["notepad"] if sys.platform == "win32" else ["nano", "vim", "vi"]
+    fallbacks = ["notepad"] if sys.platform == "win32" else ["vim", "vi", "nano"]
     for name in fallbacks:
         if shutil.which(name):
             return [name]

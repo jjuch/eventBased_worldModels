@@ -45,7 +45,7 @@ def propose_camera_command(
     minimum_diameter_px: Annotated[
         float,
         typer.Option("--minimum-diameter-px", min=1.0),
-    ] = 35.0,
+    ] = 20.0,
     target_diameter_px: Annotated[
         float,
         typer.Option("--target-diameter-px", min=1.0),
