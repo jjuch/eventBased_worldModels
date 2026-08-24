@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import yaml
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .discovery import ProjectContext
 
@@ -16,8 +17,46 @@ CAMERA_KEYS = (
     "sensor_width_mm",
 )
 
+CAMERA_OPTIMISATION_SECTION = "camera_optimisation_settings"
+
+class CameraOptimisationSettings(BaseModel):
+    """Project-local settings controlling the deterministic camera search."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    minimum_diameter_px: float = Field(default=20.0, gt=0.0)
+    target_diameter_px: float = Field(default=70.0, gt=0.0)
+
+    @model_validator(mode="after")
+    def target_is_not_smaller_than_minimum(self) -> "CameraOptimisationSettings":
+        if self.target_diameter_px < self.minimum_diameter_px:
+            raise ValueError(
+                "camera_optimisation_settings.target_diameter_px must be greater "
+                "than or equal to minimum_diameter_px."
+            )
+        return self
+
+
 def rendering_config_path(context: ProjectContext) -> Path:
     return context.resolve(context.manifest.configs.rendering)
+
+
+def load_camera_omtimisation_settings(context: ProjectContext) -> CameraOptimisationSettings:
+    path = rendering_config_path(context)
+    value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    if not isinstance(value, dict):
+        raise ValueError(f"Rendering configuration must contain a YAML mapping: {path}.")
+
+    raw_settings = value.get(CAMERA_OPTIMISATION_SECTION)
+    if raw_settings is None:
+        raise ValueError(
+            f"Rendering configuration {path} has no "
+            f"'{CAMERA_OPTIMISATION_SECTION}' section. Add, for example:\n\n"
+            "camera_optimisation_settings:\n"
+            "  minimum_diameter_px: 20.0\n"
+            "  target_diameter_px: 70.0"
+        )
+    return CameraOptimisationSettings.model_validate(raw_settings)
 
 
 def camera_work_path(context: ProjectContext) -> Path:

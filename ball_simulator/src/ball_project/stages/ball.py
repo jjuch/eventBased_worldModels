@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from ball_project.commands import executable, run_command
 from ball_project.discovery import ProjectContext
 from ball_project.effective_configs import (
@@ -13,6 +11,7 @@ from ball_project.render_config import (
     apply_proposed_camera,
     archive_rendering_config,
     camera_work_path,
+    load_camera_omtimisation_settings,
 )
 
 def generate_trajectories(context: ProjectContext, *, dry_run: bool = False) -> None:
@@ -32,6 +31,7 @@ def generate_trajectories(context: ProjectContext, *, dry_run: bool = False) -> 
 
 def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
     base_config = effective_render_config(context)
+    settings = load_camera_omtimisation_settings(context)
     proposal = camera_work_path(context)
     command = [
         executable("ball_renderer"),
@@ -43,14 +43,19 @@ def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
         str(proposal),
         "--report",
         str(context.resolve(context.manifest.paths.camera_report)),
+        "--minimum-diameter-px",
+        str(settings.minimum_diameter_px),
+        "--target-diameter-px",
+        str(settings.target_diameter_px),
     ]
-    if context.manifest.project.mode == "rotation":
-        command.extend(["--minimum-diameter-px", "90", "--target-diameter-px", "130"])
-    else:
-        command.extend(["--minimum-diameter-px", "35", "--target-diameter-px", "70"])
 
     if dry_run:
         run_command(context, command, stage="camera", dry_run=True)
+        print(
+            f"Camera optimisation settings: minimum_diameter_px="
+            f"{settings.minimum_diameter_px}, target_diameter_px="
+            f"{settings.target_diameter_px}"
+        )
         print(
             f"Would archive {base_config} and copy the proposed camera fields back "
             "into that same authoritative file."

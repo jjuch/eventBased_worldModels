@@ -1,10 +1,21 @@
 from pathlib import Path
 
+import pytest
+import yaml
+from pydantic import ValidationError
+
 import h5py
 import numpy as np
 
 from ball_simulator.rendering.camera_optimiser import optimise_camera, project_spheres
 from ball_simulator.rendering.config import RenderConfig
+from ball_project.creator import create_project
+from ball_project.discovery import discover_project
+from ball_project.render_config import (
+    CameraOptimisationSettings,
+    apply_proposed_camera,
+    load_camera_omtimisation_settings,
+)
 
 def _dataset(path: Path) -> None:
     with h5py.File(path, "w") as handle:
@@ -55,3 +66,86 @@ def test_camera_proposal_contains_all_spheres(tmp_path):
     assert np.all(u + radius < config.width)
     assert np.all(v - radius > 0.0)
     assert np.all(v + radius < config.height)
+
+
+@pytest.mark.parametrize(
+    ("mode", "minimum", "target"),
+    [
+        ("translation", 20.0, 70.0),
+        ("rotation", 90.0, 130.0),
+        ("combined", 20.0, 70.0),
+    ],
+)
+def test_project_templates_define_camera_optimisation_settings(
+    tmp_path,
+    mode,
+    minimum,
+    target,
+):
+    root = create_project(
+        f"{mode}_trial",
+        experiment_type="ball",
+        subtype="free-flight",
+        mode=mode,
+        parent=tmp_path,
+    )
+    settings = load_camera_omtimisation_settings(discover_project(root))
+    assert settings.minimum_diameter_px == minimum
+    assert settings.target_diameter_px == target
+
+
+def test_user_changes_are_loaded_from_rendering_yaml(tmp_path):
+    root = create_project(
+        "trial",
+        experiment_type="ball",
+        subtype="free-flight",
+        mode="translation",
+        parent=tmp_path,
+    )
+    rendering = root / "configs/rendering.yaml"
+    value = yaml.safe_load(rendering.read_text(encoding="utf-8"))
+    value["camera_optimisation_settings"]["minimum_diameter_px"] = 22.0
+    value["camera_optimisation_settings"]["target_diameter_px"] = 55.0
+    rendering.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
+
+    settings = load_camera_omtimisation_settings(discover_project(root))
+    assert settings.minimum_diameter_px == 22.0
+    assert settings.target_diameter_px == 55.0
+
+
+def test_camera_application_preserves_optimisation_settings(tmp_path):
+    root = create_project(
+        "trial",
+        experiment_type="ball",
+        subtype="free-flight",
+        mode="translation",
+        parent=tmp_path,
+    )
+    context = discover_project(root)
+    authoritative = root / "configs/rendering.yaml"
+    before = yaml.safe_load(authoritative.read_text(encoding="utf-8"))
+    proposal = root / ".ball_project/effective/proposal.yaml"
+    proposed = dict(before)
+    proposed["camera"] = {
+        **before["camera"],
+        "location": [1.0, 2.0, 3.0],
+        "target": [0.0, 0.0, 0.5],
+        "focal_length_mm": 50.0,
+    }
+    proposal.parent.mkdir(parents=True, exist_ok=True)
+    proposal.write_text(yaml.safe_dump(proposed, sort_keys=False), encoding="utf-8")
+
+    apply_proposed_camera(context, proposal)
+    after = yaml.safe_load(authoritative.read_text(encoding="utf-8"))
+    assert (
+        after["camera_optimisation_settings"]
+        == before["camera_optimisation_settings"]
+    )
+
+
+def test_invalid_diameter_order_is_rejected():
+    with pytest.raises(ValidationError):
+        CameraOptimisationSettings(
+            minimum_diameter_px=80.0,
+            target_diameter_px=60.0,
+        )

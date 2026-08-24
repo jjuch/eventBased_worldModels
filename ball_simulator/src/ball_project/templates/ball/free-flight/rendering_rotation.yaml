@@ -8,6 +8,9 @@ source: observations
 frame_dt: 0.01
 fixed_visual_y_extent: 2.5
 wall_thickness: 0.06
+camera_optimisation_settings:
+  minimum_diameter_px: 90.0
+  target_diameter_px: 130.0
 camera:
   location: [4.0, -5.0, 3.0]
   target: [0.0, 0.0, 0.65]
