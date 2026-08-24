@@ -25,8 +25,13 @@ def show_status(context: ProjectContext) -> None:
         f"[bold]Type:[/bold] {context.manifest.project.type} / "
         f"{context.manifest.project.subtype} / {context.manifest.project.mode}"
     )
-    console.print(f"Trajectories: {status.trajectories if status.trajectories is not None else 'not generated'}")
-    console.print(f"Camera: {'ready' if status.camera_ready else 'not proposed'}")
+    console.print(
+        f"Trajectories: "
+        f"{status.trajectories if status.trajectories is not None else 'not generated'}")
+    console.print(f"Camera proposal: {'applied' if status.camera_ready else 'not applied'}")
+    console.print(f"Active rendering config: {status.active_rendering_config}")
+    if status.camera_summary is not None:
+        console.print(f"Active camera: {status.camera_summary}")
     console.print(f"Rendered trajectories: {status.rendered_complete}")
     console.print(f"Manifest: {'ready' if status.manifest_ready else 'not built'}")
     console.print(f"Checkpoints: {status.training_runs}")

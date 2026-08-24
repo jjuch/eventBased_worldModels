@@ -38,7 +38,7 @@ def effective_training_config(context: ProjectContext) -> Path:
     return _write(context.root / ".ball_project/effective/training.yaml", value)
 
 def effective_render_config(context: ProjectContext) -> Path:
-    optimised = context.resolve(context.manifest.configs.optimised_rendering)
-    if optimised.is_file():
-        return optimised
-    return context.resolve(context.manifest.configs.rendering)
+    path = context.resolve(context.manifest.configs.rendering)
+    if not path.is_file():
+        raise FileNotFoundError(f"Rendering configuration does not exist: {path}.")
+    return path

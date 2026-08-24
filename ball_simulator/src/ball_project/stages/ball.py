@@ -9,6 +9,11 @@ from ball_project.effective_configs import (
     effective_render_config,
     effective_training_config,
 )
+from ball_project.render_config import (
+    apply_proposed_camera,
+    archive_rendering_config,
+    camera_work_path,
+)
 
 def generate_trajectories(context: ProjectContext, *, dry_run: bool = False) -> None:
     command = [
@@ -26,14 +31,16 @@ def generate_trajectories(context: ProjectContext, *, dry_run: bool = False) -> 
 
 
 def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
+    base_config = effective_render_config(context)
+    proposal = camera_work_path(context)
     command = [
         executable("ball_renderer"),
         "propose-camera",
         str(context.resolve(context.manifest.paths.trajectory_dataset)),
         "--config",
-        str(context.resolve(context.manifest.configs.rendering)),
+        str(base_config),
         "--output",
-        str(context.resolve(context.manifest.configs.optimised_rendering)),
+        str(proposal),
         "--report",
         str(context.resolve(context.manifest.paths.camera_report)),
     ]
@@ -41,7 +48,23 @@ def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
         command.extend(["--minimum-diameter-px", "90", "--target-diameter-px", "130"])
     else:
         command.extend(["--minimum-diameter-px", "35", "--target-diameter-px", "70"])
+
+    if dry_run:
+        run_command(context, command, stage="camera", dry_run=True)
+        print(
+            f"Would archive {base_config} and copy the proposed camera fields back "
+            "into that same authoritative file."
+        )
+        return
+
+    # The proposal is generated separately first. The authoritative config is changed
+    # only after the external command has succeeded.
     run_command(context, command, stage="camera", dry_run=dry_run)
+    backup = archive_rendering_config(context)
+    updated = apply_proposed_camera(context, proposal)
+    proposal.unlink(missing_ok=True)
+    print(f"Updated active rendering config: {updated}")
+    print(f"Previous rendering config archived at: {backup}")
 
 
 def render(context: ProjectContext, *, one: str | None = None, dry_run: bool = False) -> None:
