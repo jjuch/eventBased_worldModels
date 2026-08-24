@@ -40,7 +40,7 @@ def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
     if context.manifest.project.mode == "rotation":
         command.extend(["--minimum-diameter-px", "90", "--target-diameter-px", "130"])
     else:
-        command.extend(["--minimum-diameter-px", "35", "--target-diameter-px", "70"])
+        command.extend(["--minimum-diameter-px", "20", "--target-diameter-px", "70"])
     run_command(context, command, stage="camera", dry_run=dry_run)
 
 
