@@ -10,7 +10,7 @@ model:
   orientation_weight: 1.0
 
 training:
-  output_directory: local_experiments/small_batch/rendered/training/outputs/observability
+  output_directory: local_experiments/medium_batch/outputs/observability
   epochs: 50
   devices: auto
   precision: bf16-mixed

@@ -1,5 +1,5 @@
-width: 128
-height: 128
+width: 512
+height: 512
 fps: 100
 engine: BLENDER_EEVEE_NEXT
 samples: 16
@@ -7,11 +7,11 @@ transparent_background: false
 source: high_rate
 frame_dt: 0.01
 fixed_visual_y_extent: 4.0
-wall_thickness: 0.08
+wall_thickness: 0.001
 camera:
   location: [3.8, -4.5, 2.8]
   target: [1.0, 0.0, 0.7]
-  focal_length_mm: 42.0
+  focal_length_mm: 50.0
   sensor_width_mm: 36.0
 lighting:
   world_strength: 0.08
@@ -21,12 +21,12 @@ lighting:
   fill_size: 3.0
 environment:
   representation: cutaway
-  near_wall_alpha: 0.12
+  near_wall_alpha: 0.00
   show_near_wall_frame: true
-  frame_thickness: 0.025
+  frame_thickness: 0.001
   show_near_wall_grid: true
-  grid_spacing: 0.40
-  grid_thickness: 0.010
+  grid_spacing: 0.60
+  grid_thickness: 0.001
   checkerboard_enabled: true
   checker_size: 0.25
   checker_contrast: 0.20

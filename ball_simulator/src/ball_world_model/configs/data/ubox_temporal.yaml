@@ -1,10 +1,10 @@
-root: local_experiments/small_batch/rendered/training
-manifest_path: local_experiments/small_batch/rendered/training/manifest.parquet
+root: local_experiments/medium_batch/renderer/train
+manifest_path: local_experiments/medium_batch/renderer/train/manifest.parquet
 require_succes_marker: true
 
 image:
-  width: 256
-  height: 256
+  width: 512
+  height: 512
   channels: 3
   normalization: imagenet
 
