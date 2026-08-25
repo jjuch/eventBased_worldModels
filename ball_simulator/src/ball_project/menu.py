@@ -14,6 +14,7 @@ from .stages.ball import (
     render,
     train,
 )
+from .stages.evaluation import evaluate_observer
 
 console = Console()
 
@@ -29,7 +30,8 @@ def show_status(context: ProjectContext) -> None:
         f"Trajectories: "
         f"{status.trajectories if status.trajectories is not None else 'not generated'}")
     console.print(f"Camera proposal: {'applied' if status.camera_ready else 'not applied'}")
-    console.print(f"Active rendering config: {status.active_rendering_config}")
+    if hasattr(status, "active_rendering_config"):
+        console.print(f"Active rendering config: {status.active_rendering_config}")
     if status.camera_summary is not None:
         console.print(f"Active camera: {status.camera_summary}")
     console.print(f"Rendered trajectories: {status.rendered_complete}")
@@ -45,10 +47,11 @@ def run_menu(context: ProjectContext) -> None:
         4: ("Build manifest", lambda: build_manifest(context)),
         5: ("Inspect data", lambda: inspect_data(context)),
         6: ("Train kinematic observer", lambda: train(context)),
-        7: ("Edit trajectory config", lambda: edit_file(context.resolve(context.manifest.configs.trajectories))),
-        8: ("Edit rendering config", lambda: edit_file(context.resolve(context.manifest.configs.rendering))),
-        9: ("Edit data config", lambda: edit_file(context.resolve(context.manifest.configs.data))),
-        10: ("Edit training config", lambda: edit_file(context.resolve(context.manifest.configs.training))),
+        7: ("Evaluate and interpret trained observer", lambda: evaluate_observer(context)),
+        8: ("Edit trajectory config", lambda: edit_file(context.resolve(context.manifest.configs.trajectories))),
+        9: ("Edit rendering config", lambda: edit_file(context.resolve(context.manifest.configs.rendering))),
+        10: ("Edit data config", lambda: edit_file(context.resolve(context.manifest.configs.data))),
+        11: ("Edit training config", lambda: edit_file(context.resolve(context.manifest.configs.training))),
     }
     while True:
         console.rule("Ball World Model Project")

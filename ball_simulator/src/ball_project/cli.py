@@ -19,6 +19,7 @@ from .stages.ball import (
     render,
     train,
 )
+from .stages.evaluation import evaluate_observer
 
 app = typer.Typer(no_args_is_help=True, help="Create and run reproducible world-model experiment workspaces.")
 config_app = typer.Typer(help="Edit project-local scientific configurations.")
@@ -165,3 +166,17 @@ def create_entrypoint() -> None:
 
 def run_entrypoint() -> None:
     app(args=["run", *sys.argv[1:]], prog_name="run_experiment")
+
+
+@app.command("evaluate")
+def evaluate_command(
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run"),
+    ] = False,
+) -> None:
+    evaluate_observer(
+        discover_project(),
+        dry_run=dry_run,
+    )
+
