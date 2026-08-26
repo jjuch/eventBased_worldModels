@@ -77,7 +77,7 @@ class KinematicObservabilityModule(L.LightningModule):
         world_angular_velocity: bool = True,
     ) -> None:
         super().__init__()
-        del state_weight, translation_consistency_weight, rotation_consistency_weight
+        # del state_weight, translation_consistency_weight, rotation_consistency_weight
         self.save_hyperparameters(ignore=("statistics",))
         self.model = KinematicStateEstimator(
             task=task,
@@ -182,7 +182,7 @@ class KinematicObservabilityModule(L.LightningModule):
             "reverse_velocity_loss": reverse_loss,
             "kinematic_loss_m2": kinematic_loss,
             "variance_loss": variance_loss,
-            "feature_delta_abs_mean": motion.normalized_forward_difference.abs().mean(),
+            "feature_delta_abs_mean": motion.normalised_forward_difference.abs().mean(),
             "motion_std": motion.forward_motion.std(unbiased=False),
             "position_rmse_m": torch.sqrt(F.mse_loss(position, target_position)),
             "velocity_rmse_mps": torch.sqrt(F.mse_loss(velocity, target_velocity)),
