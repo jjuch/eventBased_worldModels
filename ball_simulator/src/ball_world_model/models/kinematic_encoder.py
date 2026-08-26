@@ -93,14 +93,15 @@ class CoordinateAwareFrameEncoder(nn.Module):
         super().__init__()
         self.embedding_dim = embedding_dim
         # Go from a single RGB image to a latent vector of length 'embedding_dim'
+        self.feature_channels = base_channels * 4
         self.backbone = nn.Sequential(
             ConvBlock(5, base_channels, stride=2),
-            ConvBlock(base_channels, base_channels*2, stride=2),
+            ConvBlock(base_channels, base_channels * 2, stride=2),
             ConvBlock(base_channels * 2, base_channels * 4, stride=2),
             ConvBlock(base_channels * 4, base_channels * 4, stride=2),
         )
         self.readout = SoftkeypointReadout(
-            base_channels * 4,
+            self.feature_channels,
             keypoints=keypoints,
             appearance_dim=keypoint_appearance_dim,
         )
@@ -110,6 +111,27 @@ class CoordinateAwareFrameEncoder(nn.Module):
             nn.LayerNorm(embedding_dim),
             nn.SiLU(),
         )
+
+
+    def encode_feature_maps(self, frames: torch.Tensor) -> torch.Tensor:
+        if frames.ndim != 5 or frames.shape[2] != 3:
+            raise ValueError(f"Expected (B, T, 3, H, W), recieved {tuple(frames.shape)}.")
+
+        batch, time, _, height, width = frames.shape
+        flat = frames.flatten(0, 1)
+        coords = coordinate_channels(
+            batch * time, height, width, device=frames.device, dtype=frames.dtype
+        )
+        maps = self.backbone(torch.cat((flat, coords), dim=1))
+        return maps.reshape(batch, time, *maps.shape[1:])
+
+
+    def embeddings_from_maps(self, maps: torch.Tensor) -> torch.Tensor:
+        if maps.ndim != 5:
+            raise ValueError("Expected feature maps with shape (B, T, C, H, W).")
+        batch, time = maps.shape[:2]
+        embeddings = self.projector(self.readout(maps.flatten(0, 1)))
+        return embeddings.reshape(batch, time, self.embedding_dim)
 
 
     def forward(self, frames: torch.Tensor) -> torch.Tensor:
@@ -124,17 +146,4 @@ class CoordinateAwareFrameEncoder(nn.Module):
         -------
         Tensor with shape ``(B, T, D)``.
         """
-        if frames.ndim != 5 or frames.shape[2] != 3:
-            raise ValueError(f"Expected (B,T,3,H,W), received {tuple(frames.shape)}.")
-        batch, time, _, height, width = frames.shape
-        flat = frames.flatten(0, 1)
-        coords = coordinate_channels(
-            batch * time,
-            height,
-            width,
-            device=frames.device,
-            dtype=frames.dtype,
-        )
-        features = self.backbone(torch.cat((flat, coords), dim=1))
-        embedding = self.projector(self.readout(features))
-        return embedding.reshape(batch, time, self.embedding_dim)
+        return self.embeddings_from_maps(self.encode_feature_maps(frames))

@@ -31,7 +31,7 @@ def load_kinematic_module(
     missing = [name for name in _STATISTIC_NAMES if name not in state_dict]
     if missing:
         raise ValueError(
-            f"Checkpoint {checkpoint_path} is missing normalization buffers: {missing}"
+            f"Checkpoint {checkpoint_path} is missing normalisation buffers: {missing}"
         )
 
     statistics = KinematicStatistics(
@@ -41,11 +41,25 @@ def load_kinematic_module(
     allowed = {
         "task",
         "embedding_dim",
-        "temporal_depth",
         "keypoints",
+        "motion_dim",
+        "decoder_hidden_dim",
+        "refinement_hidden_dim",
+        "refinement_iterations",
+        "delta_momentum",
+        "default_frame_dt",
         "dropout",
+        "temporal_depth",
         "learning_rate",
         "weight_decay",
+        "position_weight",
+        "velocity_weight",
+        "latent_prediction_weight",
+        "kinematic_weight",
+        "reverse_weight",
+        "variance_weight",
+        "rotation_weight",
+        "angular_velocity_weight",
         "state_weight",
         "translation_consistency_weight",
         "rotation_consistency_weight",
