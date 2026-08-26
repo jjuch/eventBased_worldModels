@@ -13,6 +13,7 @@ from ball_world_model.data.discovery import validate_trajectory
 from ball_world_model.data.inspection import describe_batch, save_batch_inspection
 from ball_world_model.data.manifest import build_manifest, load_manifest, save_manifest
 from ball_world_model.training import train_kinematic
+from .evaluation_cli import register_evaluation_command
 
 
 app = typer.Typer(
@@ -153,3 +154,6 @@ def train_kinematic_command(
     """Train translation-only, rotation-only, or combined temporal observers."""
     checkpoint = train_kinematic(config)
     print(f"[green]Best checkpoint:[/green] {checkpoint.resolve()}")
+
+
+register_evaluation_command(app)

@@ -128,7 +128,7 @@ def trajectory_reports(records, output: Path, count: int, seed: int):
         errors = []
         if "predicted_position" in record:
             errors.append(
-                np.mean(np.linalg.norm(record["prediction_position"] - record["target_position"], axis=-1))
+                np.mean(np.linalg.norm(record["predicted_position"] - record["target_position"], axis=-1))
             )
         if "predicted_linear_velocity" in record:
             errors.append(
@@ -181,7 +181,7 @@ def intervention_report(module, loader, device, maximum_windows: int, seed: int)
         variants = {
             "forward": images,
             "reversed": torch.flip(images, dims=(1,)),
-            "repeated_last": images[:, -1].expand_as(images),
+            "repeated_last": images[:, -1:].expand_as(images),
             "shuffled": images[:, torch.randperm(images.shape[1], generator=rng)],
         }
         for name, variant in variants.items():

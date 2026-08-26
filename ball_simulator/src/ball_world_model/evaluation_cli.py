@@ -22,7 +22,7 @@ def register_evaluation_command(app: typer.Typer) -> None:
         ],
         output: Annotated[
             Path,
-            typer.Option("-output", "-o"),
+            typer.Option("--output", "-o"),
         ] = Path("outputs/evaluation"),
         maximum_test_windows: Annotated[
             int,
