@@ -9,17 +9,11 @@ from ball_project.effective_configs import effective_training_config
 
 def find_best_checkpoint(context: ProjectContext) -> Path:
     root = context.resolve(context.manifest.paths.training_outputs)
-    best = sorted(root.glob("**/best*.ckpt"), key=lambda path: path.stat().st_mtime)
-    if best:
-        return best[-1]
-
-    last = sorted(root.glob("**/last.ckpt"), key=lambda path: path.stat().st_mtime)
-    if last:
-        return last[-1]
-
-    any_checkpoint = sorted(root.glob("**/*.ckpt"), key=lambda path: path.stat().st_mtime)
-    if any_checkpoint:
-        return any_checkpoint[-1]
+    patterns = ("**/best*.ckpt", "**/last.ckpt", "**/*.ckpt")
+    for pattern in patterns:
+        candidates = sorted(root.glob(pattern), key=lambda path: path.stat().st_mtime)
+        if candidates:
+            return candidates[-1]
 
     raise FileNotFoundError(
         f"No checkpoint found under {root}. Train the kinematic observer first."

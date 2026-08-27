@@ -23,7 +23,7 @@ def regression_metrics(target: np.ndarray, prediction: np.ndarray) -> dict[str, 
         "count": int(target.size),
     }
 
-def fit_linear_probe(features: np.ndarray, targets: np.ndarray, ridge: float = 1.0e-5):
+def fit_linear_probe(features: np.ndarray, targets: np.ndarray, ridge: float = 1.0e-4) -> np.ndarray:
     features = np.asarray(features, dtype=np.float64)
     targets = np.asarray(targets, dtype=np.float64)
     augmented = np.column_stack((features, np.ones(len(features))))
@@ -39,3 +39,16 @@ def fit_linear_probe(features: np.ndarray, targets: np.ndarray, ridge: float = 1
 def apply_linear_probe(features: np.ndarray, weights: np.ndarray) -> np.ndarray:
     augmented = np.column_stack((features, np.ones(len(features))))
     return augmented @ weights
+
+
+def effective_rank(features: np.ndarray) -> float:
+    features = np.asarray(features, dtype=np.float64)
+    features = features - features.mean(axis=0, keepdims=True)
+    singular_values = np.linalg.svd(features, compute_uv=False)
+    probabilities = singular_values**2
+    total = probabilities.sum()
+    if total <= 0:
+        return 0.0
+    probabilities /= total
+    entropy = -np.sum(probabilities * np.log(probabilities + 1.0e-12))
+    return float(np.exp(entropy))

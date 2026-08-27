@@ -19,9 +19,10 @@ from .metrics import (
     apply_linear_probe,
     fit_linear_probe,
     regression_metrics,
+    effective_rank,
 )
 from .model_loader import denormalised_prediction, load_kinematic_module
-from .plots import save_component_scatter, save_probe_plot, save_trajectory_plot
+from .plots import component_scatter, error_vs_speed, probe_plot, trajectory_plot
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,36 +76,37 @@ def collect_predictions(module, loader, device, maximum_windows: int):
     records = []
     for batch in _limit_loader(loader, maximum_windows):
         images = batch["context_rgb"].to(device)
-        prediction = module.model(images)
+        time = batch["context_time"].to(device)
+        prediction = module.model(images, time)
         decoded = denormalised_prediction(module, prediction)
-        size = images.shape[0]
-        for index in range(size):
-            record = {
-                "trajectory_id": batch["trajectory_id"][index],
-                "start_frame": int(batch["start_frame"][index]),
-                "time": _numpy(batch["context_time"][index]),
-                "target_position": _numpy(batch["context_position"][index]),
-                "target_velocity": _numpy(batch["context_linear_velocity"][index]),
-                "target_quaternion": _numpy(batch["context_quaternion_xyzw"][index]),
-            }
-            for key, value in decoded.items():
-                record[f"predicted_{key}"] = _numpy(value[index])
-            records.append(record)
+        for index in range(len(images)):
+            records.append(
+                {
+                    "trajectory_id": batch["trajectory_id"][index],
+                    "start_frame": int(batch["start_frame"][index]),
+                    "time": _numpy(time[index]),
+                    "target_position": _numpy(batch["context_position"][index]),
+                    "target_velocity": _numpy(batch["context_linear_velocity"][index]),
+                    "target_quaternion": _numpy(batch["context_quaternion_xyzw"][index]),
+                    "predicted_position": _numpy(decoded["position"][index]),
+                    "predicted_velocity": _numpy(decoded["linear_velocity"][index])
+                }
+            )
     return records
 
-def aggregate_report(records, output: Path):
+def aggregate_report(records: list[dict], output: Path) -> dict:
     rows = []
     summary = {}
     for quantity, target_key, prediction_key, unit in (
         ("position", "target_position", "predicted_position", "m"),
-        ("velocity", "target_velocity", "predicted_linear_velocity", "m/s"),
+        ("velocity", "target_velocity", "predicted_velocity", "m/s"),
     ):
         available = [record for record in records if prediction_key in record]
         if not available:
             continue
         target = np.concatenate([record[target_key] for record in available], axis=0)
         prediction = np.concatenate([record[prediction_key] for record in available], axis=0)
-        save_component_scatter(
+        component_scatter(
             target,
             prediction,
             quantity=quantity.title(),
@@ -118,10 +120,11 @@ def aggregate_report(records, output: Path):
             rows.append({"quantity": quantity, "component": label, **metrics})
         summary[quantity] = components
     _csv(output / "aggregate_metrics.csv", rows)
+    error_vs_speed(records, output / "error_vs_speed.png")
     return summary
 
 
-def trajectory_reports(records, output: Path, count: int, seed: int):
+def trajectory_reports(records: list[dict], output: Path, count: int, seed: int) -> None:
     output.mkdir(parents=True, exist_ok=True)
     scored = []
     for record in records:
@@ -133,7 +136,7 @@ def trajectory_reports(records, output: Path, count: int, seed: int):
         if "predicted_linear_velocity" in record:
             errors.append(
                 np.mean(
-                    np.linalg.norm(record["predicted_linear_velocity"] - record["target_velocity"], axis=-1)
+                    np.linalg.norm(record["predicted_velocity"] - record["target_velocity"], axis=-1)
                 )
             )
         scored.append((float(np.mean(errors)), record))
@@ -153,139 +156,159 @@ def trajectory_reports(records, output: Path, count: int, seed: int):
         selected.extend((f"random_{number:02d}", scored[index][1]) for number, index in enumerate(indices))
 
     for label, record in selected:
-        save_trajectory_plot(
+        trajectory_plot(
+            record,
             time=record["time"],
-            target_position=(record["target_position"] if "predicted_position" in record else None),
-            predicted_position=record.get("predicted_position"),
-            target_velocity=(
-                record["target_velocity"] if "predicted_linear_velocity" in record else None
-            ),
-            predicted_velocity=record.get("predicted_linear_velocity"),
             output=output / f"{label}_{record['trajectory_id']}_{record['start_frame']:06d}.png",
             title=f"{label}: trajectory {record['trajectory_id']}, start {record['start_frame']}",
         )
 
 
 @torch.inference_mode()
-def intervention_report(module, loader, device, maximum_windows: int, seed: int):
+def intervention_report(module, loader, device, maximum_windows: int, seed: int) -> list[dict]:
     rng = torch.Generator(device="cpu")
     rng.manual_seed(seed)
-    accumulators = {
+    accumulators: dict[str, list[np.ndarray]] = {
         "forward": [],
         "reversed": [],
         "repeated_last": [],
         "shuffled": [],
     }
+    motion_latents: dict[str, list[np.ndarray]]
     for batch in _limit_loader(loader, maximum_windows):
         images = batch["context_rgb"]
+        relative_time = batch["context_time"] - batch["context_time"][:, :1]
+        permutation = torch.randperm(images.shape[1], generator=rng)
         variants = {
             "forward": images,
             "reversed": torch.flip(images, dims=(1,)),
             "repeated_last": images[:, -1:].expand_as(images),
-            "shuffled": images[:, torch.randperm(images.shape[1], generator=rng)],
+            "shuffled": images[:, permutation],
         }
         for name, variant in variants.items():
-            prediction = module.model(variant.to(device))
+            prediction = module.model(variant.to(device), relative_time.to(device))
             decoded = denormalised_prediction(module, prediction)
             if "linear_velocity" in decoded:
                 # Mean over time is robust to the changed endpoint in reversed sequences.
-                accumulators[name].append(_numpy(decoded["linear_velocity"].mean(dim=1)))
+                accumulators[name].append(_numpy(decoded["linear_velocity"][:, :-1]))
+            motion_latents[name].append(_numpy(prediction.motion.forward_motion))
 
-    if not accumulators["forward"]:
-        return []
-    values = {name: np.concatenate(items) for name, items in accumulators.items()}
+    values = {name: np.concatenate(items).reshape(-1, 3) for name, items in accumulators.items()}
+    latents = {
+        name: np.concatenate(items).reshape(-1, items[0].shape[-1])
+        for name, items in motion_latents.items()
+    }
+
     forward = values["forward"]
+    forward_motion = latents["forward"]
     rows = []
-    for name, estimate in values.items():
+    for name in values:
+        estimate = values[name]
+        motion = latents[name]
         rows.append(
             {
                 "intervention": name,
                 "mean_speed": float(np.mean(np.linalg.norm(estimate, axis=-1))),
-                "mean_delta_from_forward": float(
-                    np.mean(np.linalg.norm(estimate - forward, axis=-1))
-                ),
-                "mean_reversal_error": float(
-                    np.mean(np.linalg.norm(estimate + forward, axis=-1)) # negative velocity expected
-                ),
-                "vx": float(estimate[:, 0].mean()),
-                "vy": float(estimate[:, 1].mean()),
-                "vz": float(estimate[:, 2].mean()),
+                "velocity_delta_from_forward": float(np.mean(np.linalg.norm(estimate - forward, axis=-1))),
+                "velocity_reversal_error": float(np.mean(np.linalg.norm(estimate + forward, axis=-1))),
+                "motion_delta_from_forward": float(np.mean(np.linalg.norm(motion - forward_motion, axis=-1))),
                 "count": len(estimate),
+
             }
         )
     return rows
 
 
 @torch.inference_mode()
-def extract_features(module, loader, device, maximum_windows: int):
-    features = {
-        "frame_last": [],
-        "frame_sequence_mean": [],
-        "frame_difference": [],
-        "temporal_last": [],
+def extract_representations(module, loader, device, maximum_windows: int):
+    features: dict[str, list[np.ndarray]] = {
+        "content_last": [],
+        "content_difference": [],
+        "spatial_map_last_mean": [],
+        "spatial_feature_rate_mean": [],
+        "motion_forward_mean": [],
+        "motion_backward_mean": [],
+        "predicted_next_last": [],
     }
     targets = {"position": [], "velocity": []}
-    consumed = 0
+    diagnostics = {"representation": [], "mean_std": [], "effective_rank": []}
+
     for batch in _limit_loader(loader, maximum_windows):
         images = batch["context_rgb"].to(device)
-        frame = module.model.frame_encoder(images)
-        temporal = module.model.temporal_encoder(frame)
-        features["frame_last"].append(_numpy(frame[:, -1]))
-        features["frame_sequence_mean"].append(_numpy(frame.mean(dim=1)))
-        features["frame_difference"].append(_numpy(frame[:, -1] - frame[:, 0]))
-        features["temporal_last"].append(_numpy(temporal[:, -1]))
+        time = batch["context_time"].to(device)
+        prediction = module.model(images, time)
+        maps = prediction.feature_maps
+        content = prediction.frame_latent
+        motion = prediction.motion
+
+        features["content_last"].append(_numpy(content[:, -1]))
+        features["content_difference"].append(_numpy(content[:, -1] - content[:, 0]))
+        features["spatial_map_last_mean"].append(_numpy(maps[:, -1].mean(dim=(-1, -2))))
+        normalised_difference = getattr(
+            motion,
+            "normalised_forward_difference",
+            getattr(motion, "normalised_forward_difference", None),
+        )
+        if normalised_difference is None:
+            raise AttributeError(
+                "MotionDiagnostics exposes neither normalised_forward_difference "
+                "nor normalized_forward_difference."
+            )
+        features["spatial_feature_rate_mean"].append(
+            _numpy(normalised_difference.mean(dim=(1, 3, 4)))
+        )
+        features["motion_forward_mean"].append(_numpy(motion.forward_motion.mean(dim=1)))
+        features["motion_backward_mean"].append(_numpy(motion.backward_motion.mean(dim=1)))
+        features["predicted_next_last"].append(_numpy(motion.predicted_next_embedding[:, -1]))
         targets["position"].append(_numpy(batch["context_position"][:, -1]))
         targets["velocity"].append(_numpy(batch["context_linear_velocity"][:, -1]))
-        consumed += len(images)
-    return (
-        {name: np.concatenate(value) for name, value in features.items()},
-        {name: np.concatenate(value) for name, value in targets.items()},
-    )
+
+    joined = {name: np.concatenate(values) for name, values in features.items()}
+    joined_targets = {name: np.concatenate(values) for name, values in targets.items()}
+    for name, value in joined.items():
+        diagnostics["representation"].append(name)
+        diagnostics["mean_std"].append(float(value.std(axis=0).mean()))
+        diagnostics["effective_rank"].append(effective_rank(value))
+    return joined, joined_targets, diagnostics
 
 
-def probe_report(module, train_loader, test_loader, device, train_maximum, test_maximum, output):
-    train_features, train_targets = extract_features(module, train_loader, device, train_maximum)
-    test_features, test_targets = extract_features(module, test_loader, device, test_maximum)
+def probe_report(module, train_loader, test_loader, device, train_maximum: int, test_maximum: int, output: Path):
+    train_features, train_targets, _ = extract_representations(module, train_loader, device, train_maximum)
+    test_features, test_targets, diagnostics = extract_representations(module, test_loader, device, test_maximum)
     rows = []
-    for quantity in ("position", "velocity"):
-        mean_estimate = np.broadcast_to(
-            train_targets[quantity].mean(axis=0),
-            test_targets[quantity].shape,
-        )
-        component_r2 = []
-        component_rmse = []
-        mean_row = {"layer": "mean_state_baseline", "quantity": quantity}
-        for component, label in enumerate(("x", "y", "z")):
-            metrics = regression_metrics(
-                test_targets[quantity][:, component], mean_estimate[:, component]
-            )
-            mean_row[f"r2_{label}"] = metrics["r2"]
-            mean_row[f"rmse_{label}"] = metrics["rmse"]
-            component_r2.append(metrics["r2"])
-            component_rmse.append(metrics["rmse"])
-        mean_row["r2_mean"] = float(np.nanmean(component_r2))
-        mean_row["rmse_mean"] = float(np.mean(component_rmse))
-        rows.append(mean_row)
-
-    for layer in train_features:
+    for representation in train_features:
         for quantity in ("position", "velocity"):
-            weights = fit_linear_probe(train_features[layer], train_targets[quantity])
-            estimate = apply_linear_probe(test_features[layer], weights)
-            component_r2 = []
-            component_rmse = []
-            row = {"layer": layer, "quantity": quantity}
+            weights = fit_linear_probe(train_features[representation], train_targets[quantity])
+            estimate = apply_linear_probe(test_features[representation], weights)
+            row = {"representation": representation, "quantity": quantity}
+            r2_values, rmse_values = [], []
+
             for component, label in enumerate(("x", "y", "z")):
-                metrics = regression_metrics(test_targets[quantity][:, component], estimate[:, component])
+                metrics = regression_metrics(
+                    test_targets[quantity][:, component], estimate[:, component]
+                )
                 row[f"r2_{label}"] = metrics["r2"]
                 row[f"rmse_{label}"] = metrics["rmse"]
-                component_r2.append(metrics["r2"])
-                component_rmse.append(metrics["rmse"])
-            row["r2_mean"] = float(np.nanmean(component_r2))
-            row["rmse_mean"] = float(np.mean(component_rmse))
+                r2_values.append(metrics["r2"])
+                rmse_values.append(metrics["rmse"])
+            row["r2_mean"] = float(np.nanmean(r2_values))
+            row["rmse_mean"] = float(np.mean(rmse_values))
             rows.append(row)
     _csv(output / "layerwise_linear_probes.csv", rows)
-    save_probe_plot(rows, output / "layerwise_linear_probes.png")
-    return rows
+
+    activation_rows = [
+        {
+            "representation": name,
+            "mean_feature_std": std,
+            "effective_rank": rank,
+        }
+        for name, std, rank in zip(
+            diagnostics["representation"], diagnostics["mean_std"], diagnostics["effective_rank"]
+        )
+    ]
+    _csv(output / "representation_statistics.csv", activation_rows)
+    probe_plot(rows, output / "layerwise_linear_probes.png")
+    return rows, activation_rows
 
 
 def evaluate_kinematic_observer(
@@ -305,6 +328,7 @@ def evaluate_kinematic_observer(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     module = load_kinematic_module(checkpoint_path, device=device)
+
     records = collect_predictions(module, test_loader, device, settings.maximum_test_windows)
     summary = aggregate_report(records, output)
     trajectory_reports(
@@ -321,7 +345,7 @@ def evaluate_kinematic_observer(
         settings.seed,
     )
     _csv(output / "interventions.csv", interventions)
-    probes = probe_report(
+    probes, representation_statistics = probe_report(
         module,
         train_loader,
         test_loader,
@@ -339,6 +363,7 @@ def evaluate_kinematic_observer(
         "aggregate": summary,
         "interventions": interventions,
         "probes": probes,
+        "representation_statistics": representation_statistics,
     }
     (output / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return output.resolve()

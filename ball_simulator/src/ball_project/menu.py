@@ -47,7 +47,7 @@ def run_menu(context: ProjectContext) -> None:
         4: ("Build manifest", lambda: build_manifest(context)),
         5: ("Inspect data", lambda: inspect_data(context)),
         6: ("Train kinematic observer", lambda: train(context)),
-        7: ("Evaluate and interpret trained observer", lambda: evaluate_observer(context)),
+        7: ("Evaluate and interprete trained observer", lambda: evaluate_observer(context)),
         8: ("Edit trajectory config", lambda: edit_file(context.resolve(context.manifest.configs.trajectories))),
         9: ("Edit rendering config", lambda: edit_file(context.resolve(context.manifest.configs.rendering))),
         10: ("Edit data config", lambda: edit_file(context.resolve(context.manifest.configs.data))),

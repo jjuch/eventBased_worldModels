@@ -14,11 +14,11 @@ def register_evaluation_command(app: typer.Typer) -> None:
     def evaluate_kinematic_command(
         checkpoint: Annotated[
             Path,
-            typer.Option("--checkpoint", exists=True, readable=True),
+            typer.Option("--checkpoint", exists=True, file_okay=True, readable=True),
         ],
         config: Annotated[
             Path,
-            typer.Option("--config", "-c", exists=True, readable=True),
+            typer.Option("--config", "-c", exists=True, file_okay=True,readable=True),
         ],
         output: Annotated[
             Path,

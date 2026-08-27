@@ -18,6 +18,42 @@ _STATISTIC_NAMES = (
     "angular_velocity_std",
 )
 
+_ALLOWED_HYPERPARAMETERS = {
+    "task",
+    "embedding_dim",
+    "keypoints",
+    "motion_dim",
+    "decoder_hidden_dim",
+    "refinement_hidden_dim",
+    "refinement_iterations",
+    "delta_momentum",
+    "default_frame_dt",
+    "dropout",
+    "temporal_depth",
+    "learning_rate",
+    "weight_decay",
+    "position_weight",
+    "velocity_weight",
+    "latent_prediction_weight",
+    "kinematic_weight",
+    "reverse_weight",
+    "variance_weight",
+    "rotation_weight",
+    "angular_velocity_weight",
+    "state_weight",
+    "translation_consistency_weight",
+    "rotation_consistency_weight",
+    "world_angular_velocity",
+}
+
+def _statistics_from_state_dict(state_dict: dict[str, torch.Tensor]) -> KinematicStatistics:
+    missing = [name for name in _STATISTIC_NAMES if name not in state_dict]
+    if missing:
+        raise ValueError(f"Checkpoint is missing normalisation buffers: {missing}.")
+    return KinematicStatistics(
+        **{name: state_dict[name].detach().cpu() for name in _STATISTIC_NAMES}
+    )
+
 
 def load_kinematic_module(
     checkpoint_path: str | Path,
@@ -28,44 +64,10 @@ def load_kinematic_module(
     checkpoint_path = Path(checkpoint_path)
     checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
     state_dict = checkpoint["state_dict"]
-    missing = [name for name in _STATISTIC_NAMES if name not in state_dict]
-    if missing:
-        raise ValueError(
-            f"Checkpoint {checkpoint_path} is missing normalisation buffers: {missing}"
-        )
 
-    statistics = KinematicStatistics(
-        **{name: state_dict[name].detach().cpu() for name in _STATISTIC_NAMES}
-    )
+    statistics = _statistics_from_state_dict(state_dict)
     hyperparameters = dict(checkpoint.get("hyper_parameters", {}))
-    allowed = {
-        "task",
-        "embedding_dim",
-        "keypoints",
-        "motion_dim",
-        "decoder_hidden_dim",
-        "refinement_hidden_dim",
-        "refinement_iterations",
-        "delta_momentum",
-        "default_frame_dt",
-        "dropout",
-        "temporal_depth",
-        "learning_rate",
-        "weight_decay",
-        "position_weight",
-        "velocity_weight",
-        "latent_prediction_weight",
-        "kinematic_weight",
-        "reverse_weight",
-        "variance_weight",
-        "rotation_weight",
-        "angular_velocity_weight",
-        "state_weight",
-        "translation_consistency_weight",
-        "rotation_consistency_weight",
-        "world_angular_velocity",
-    }
-    arguments = {key: value for key, value in hyperparameters.items() if key in allowed}
+    arguments = {key: value for key, value in hyperparameters.items() if key in _ALLOWED_HYPERPARAMETERS}
     module = KinematicObservabilityModule(statistics, **arguments)
     module.load_state_dict(state_dict, strict=True)
     module.eval()
@@ -73,8 +75,8 @@ def load_kinematic_module(
     return module
 
 
-def denormalised_prediction(module, prediction):
-    result = {}
+def denormalised_prediction(module, prediction) -> dict[str, torch.Tensor]:
+    result: dict[str, torch.Tensor] = {}
     if prediction.position is not None:
         result["position"] = module._denormalise(
             prediction.position, module.position_mean, module.position_std

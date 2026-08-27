@@ -6,125 +6,97 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def save_trajectory_plot(
-    *,
-    time: np.ndarray,
-    target_position: np.ndarray | None,
-    predicted_position: np.ndarray | None,
-    target_velocity: np.ndarray | None,
-    predicted_velocity: np.ndarray | None,
-    output: str | Path,
-    title: str,
-) -> Path:
-    output = Path(output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    rows = int(target_position is not None) + int(target_velocity is not None) + 1
-    figure, axes = plt.subplots(rows, 1, figsize=(11, 3.3 * rows), constrained_layout=True)
-    axes = np.atleast_1d(axes)
-    row = 0
-    labels = ("x", "y", "z")
-
-    if target_position is not None:
-        axis = axes[row]
-        for component, label in enumerate(labels):
-            axis.plot(time, target_position[:, component], label=f"true {label}")
-            axis.plot(
-                time,
-                predicted_position[:, component],
-                linestyle="--",
-                label=f"pred {label}",
-            )
-        axis.set_ylabel("Position [m]")
-        axis.grid(alpha=0.25)
-        axis.legend(ncols=3)
-        row += 1
-
-    if target_velocity is not None:
-        axis = axes[row]
-        for component, label in enumerate(labels):
-            axis.plot(time, target_velocity[:, component], label=f"true {label}")
-            axis.plot(
-                time,
-                predicted_velocity[:, component],
-                linestyle="--",
-                label=f"pred {label}",
-            )
-        axis.set_ylabel("Velocity [m/s]")
-        axis.grid(alpha=0.25)
-        axis.legend(ncols=3)
-        row += 1
-
-    axis = axes[row]
-    if target_position is not None:
-        position_error = np.linalg.norm(predicted_position - target_position, axis=-1)
-        axis.plot(time, position_error, label="position error [m]")
-    if target_velocity is not None:
-        velocity_error = np.linalg.norm(predicted_velocity - target_velocity, axis=-1)
-        axis.plot(time, velocity_error, label="velocity error [m/s]")
-    if predicted_position is not None and predicted_velocity is not None and len(time) > 1:
+def trajectory_plot(record: dict, output: Path, title: str) -> None:
+    time = record["time"]
+    figure, axes = plt.subplots(3, 1, figsize=(12, 10), constrained_layout=True)
+    for component, axis_name in enumerate(("x", "y", "z")):
+        axes[0].plot(time, record["target_position"][:, component], label=f"true {axis_name}")
+        axes[0].plot(time, record["predicted_position"][:, component], "--", label=f"pred {axis_name}")
+        axes[1].plot(time, record["target_velocity"][:, component], label=f"true {axis_name}")
+        axes[1].plot(time, record["predicted_velocity"][:, component], "--", label=f"pred {axis_name}")
+    axes[0].set_ylabel("Position [m]")
+    axes[1].set_ylabel("Velocity [m/s]")
+    position_error = np.linalg.norm(record["predicted_position"] - record["target_position"], axis=-1)
+    velocity_error = np.linalg.norm(record["predicted_velocity"] - record["target_velocity"], axis=-1)
+    axes[2].plot(time, position_error, label="position error [m]")
+    axes[2].plot(time, velocity_error, label="velocity error [m/s]")
+    if len(time) > 1:
         dt = np.diff(time)[:, None]
-        consistency = np.linalg.norm(
-            predicted_position[1:] - predicted_position[:-1] - dt * predicted_velocity[:-1],
+        residual = np.linalg.norm(
+            record["predicted_position"][1:]
+            - record["predicted_position"][:-1]
+            - dt * record["predicted_velocity"][:-1],
             axis=-1,
         )
-        axis.plot(time[1:], consistency, label="kinematic consistency [m]")
-    axis.set_xlabel("Time [s]")
-    axis.set_ylabel("Error norm")
-    axis.grid(alpha=0.25)
-    axis.legend()
+        axes[2].plot(time[1:], residual, label="kinematic residual [m]")
+    for axis in axes:
+        axis.grid(alpha=0.25)
+        axis.legend(ncols=3)
+    axes[2].set_xlabel("Time [s]")
     figure.suptitle(title)
+    output.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(output, dpi=170, bbox_inches="tight")
     plt.close(figure)
-    return output
 
 
-def save_component_scatter(
-    target: np.ndarray,
-    prediction: np.ndarray,
-    *,
-    quantity: str,
-    unit: str,
-    output: str | Path,
-) -> Path:
-    output = Path(output)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    figure, axes = plt.subplots(1, 3, figsize=(14, 4.3), constrained_layout=True)
-    labels = ("x", "y", "z")
-    for component, axis in enumerate(axes):
+def component_scatter(target: np.ndarray, prediction: np.ndarray, quantity: str, unit: str, output: Path) -> None:
+    figure, axes = plt.subplots(1, 3, figsize=(14, 4.5), constrained_layout=True)
+    for component, label in enumerate(("x", "y", "z")):
         truth = target[:, component]
         estimate = prediction[:, component]
         low = min(float(truth.min()), float(estimate.min()))
         high = max(float(truth.max()), float(estimate.max()))
-        axis.scatter(truth, estimate, s=7, alpha=0.35)
-        axis.plot([low, high], [low, high], color="black", linewidth=1)
+        axes[component].scatter(truth, estimate, s=7, alpha=0.3)
+        axes[component].plot([low, high], [low, high], color="black")
         residual = estimate - truth
         total = np.sum((truth - truth.mean()) ** 2)
         r2 = 1.0 - np.sum(residual**2) / total if total > 0 else np.nan
-        axis.set_title(
-            f"{quantity} {labels[component]}\n"
-            f"RMSE={np.sqrt(np.mean(residual**2)):.4g}, R2={r2:.3f}"
+        axes[component].set_title(
+            f"{quantity} {label}: RMSE={np.sqrt(np.mean(residual**2)):.4g}, R2={r2:.3f}"
         )
-        axis.set_xlabel(f"True [{unit}]")
-        axis.set_ylabel(f"Predicted [{unit}]")
-        axis.grid(alpha=0.2)
-    figure.savefig(output, dpi=170, bbox_inches="tight")
-    plt.close(figure)
-    return output
-
-
-def save_probe_plot(rows: list[dict[str, object]], output: str | Path) -> Path:
-    output = Path(output)
+        axes[component].set_xlabel(f"True [{unit}]")
+        axes[component].set_ylabel(f"Predicted [{unit}]")
+        axes[component].grid(alpha=0.2)
     output.parent.mkdir(parents=True, exist_ok=True)
-    layers = sorted({str(row["layer"]) for row in rows})
-    figure, axes = plt.subplots(1, 2, figsize=(12, 4.5), constrained_layout=True)
-    for quantity, axis in zip(("position", "velocity"), axes):
-        subset = [row for row in rows if row["quantity"] == quantity]
-        values = {str(row["layer"]): float(row["r2_mean"] or np.nan) for row in subset}
-        axis.bar(layers, [values.get(layer, np.nan) for layer in layers])
-        axis.set_title(f"Linear probe: {quantity}")
-        axis.set_ylabel("Mean component R2")
-        axis.tick_params(axis="x", rotation=25)
-        axis.grid(axis="y", alpha=0.25)
     figure.savefig(output, dpi=170, bbox_inches="tight")
     plt.close(figure)
-    return output
+
+
+def probe_plot(rows: list[dict], output: Path) -> None:
+    layers = [row["representation"] for row in rows if row["quantity"] == "velocity"]
+    position = {row["representation"]: row["r2_mean"] for row in rows if row["quantity"] == "position"}
+    velocity = {row["representation"]: row["r2_mean"] for row in rows if row["quantity"] == "velocity"}
+    figure, axes = plt.subplots(1, 2, figsize=(14, 5), constrained_layout=True)
+    axes[0].bar(layers, [position.get(layer, np.nan) for layer in layers])
+    axes[1].bar(layers, [velocity.get(layer, np.nan) for layer in layers])
+    axes[0].set_title("Linear probe: position")
+    axes[1].set_title("Linear probe: velocity")
+    for axis in axes:
+        axis.set_ylabel("Mean component R2")
+        axis.tick_params(axis="x", rotation=30)
+        axis.grid(axis="y", alpha=0.25)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output, dpi=170, bbox_inches="tight")
+    plt.close(figure)
+
+
+def error_vs_speed(records: list[dict], output: Path) -> None:
+    speed, position_error, velocity_error = [], [], []
+    for record in records:
+        speed.append(np.linalg.norm(record["target_velocity"], axis=-1))
+        position_error.append(np.linalg.norm(record["predicted_position"] - record["target_position"], axis=-1))
+        velocity_error.append(np.linalg.norm(record["predicted_velocity"] - record["target_velocity"], axis=-1))
+    speed = np.concatenate(speed)
+    position_error = np.concatenate(position_error)
+    velocity_error = np.concatenate(velocity_error)
+    figure, axes = plt.subplots(1, 2, figsize=(12, 4.5), constrained_layout=True)
+    axes[0].scatter(speed, position_error, s=5, alpha=0.2)
+    axes[1].scatter(speed, velocity_error, s=5, alpha=0.2)
+    axes[0].set_ylabel("Position error [m]")
+    axes[1].set_ylabel("Velocity error [m/s]")
+    for axis in axes:
+        axis.set_xlabel("True speed [m/s]")
+        axis.grid(alpha=0.2)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    figure.savefig(output, dpi=170, bbox_inches="tight")
+    plt.close(figure)
