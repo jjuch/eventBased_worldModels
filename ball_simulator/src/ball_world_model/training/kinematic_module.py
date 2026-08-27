@@ -77,8 +77,12 @@ class KinematicObservabilityModule(L.LightningModule):
         world_angular_velocity: bool = True,
     ) -> None:
         super().__init__()
-        # del state_weight, translation_consistency_weight, rotation_consistency_weight
-        self.save_hyperparameters(ignore=("statistics",))
+        self.save_hyperparameters(ignore=[
+            "statistics",
+            "state_weight", # Deprecated, remove over time
+            "translation_consistency_weight",
+            "rotation_consistency_weight"
+        ])
         self.model = KinematicStateEstimator(
             task=task,
             embedding_dim=embedding_dim,

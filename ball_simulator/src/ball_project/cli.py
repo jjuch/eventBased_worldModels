@@ -20,6 +20,7 @@ from .stages.ball import (
     train,
 )
 from .stages.evaluation import evaluate_observer
+from .derive import derive_project_hard_copy
 
 app = typer.Typer(no_args_is_help=True, help="Create and run reproducible world-model experiment workspaces.")
 config_app = typer.Typer(help="Edit project-local scientific configurations.")
@@ -180,3 +181,45 @@ def evaluate_command(
         dry_run=dry_run,
     )
 
+@app.command("derive")
+def derive_command(
+    name: Annotated[
+        str,
+        typer.Argument(help="Folder name for the independent derived experiment."),
+    ],
+    source: Annotated[
+        Path,
+        typer.Option(
+            "--from",
+            exists=True,
+            file_okay=False,
+            dir_okay=True,
+            readable=True,
+            help="Prepared source project to hard-copy.",
+        ),
+    ],
+    parent: Annotated[
+        Path | None,
+        typer.Option(
+            "--parent",
+            file_okay=False,
+            dir_okay=True,
+            help="Destination parent directory. Defaults to the current directory.",
+        ),
+    ] = None,
+) -> None:
+    """Hard-copy prepared trajectories, renders, manifest, configs, and reports."""
+    result = derive_project_hard_copy(
+        name,
+        source=source,
+        parent=parent,
+    )
+    print(f"[green]Created independent derived project:[/green] {result.root}")
+    print(f"[green]Source project:[/green] {result.source_root}")
+    print(
+        f"[green]Copied prepared renders:[/green] "
+        f"{result.rendered_trajectories:,} trajectories"
+    )
+    print(f"[green]Approximate copied size:[/green] {result.copied_gibibytes:.2f} GiB")
+    print("Training, evaluation, logs, and runtime records start empty.")
+    print(f"Next: cd {result.root.name} && ball_project config edit training")

@@ -182,6 +182,35 @@ ball_project config edit project
 
 Set an editor through `BALL_PROJECT_EDITOR`, `VISUAL`, or `EDITOR`, or pass `--editor`.
 
+## Copy a ball_project folder
+Do not copy a existing ball_project folder in the naive way, as this could cause conflicts in the hardcoded paths. There is a command to create a new project, using the configs, trajectories and renders from an existing source project.
+
+Suppose the source experiment is:
+```text
+local_experiments/translation_trial/
+```
+and contains completed trajectories, rendered frames, and a manifest.
+From `local_experiments/`:
+```bash
+ball_project derive translation_bidirectional \
+  --from translation_trial
+```
+This produces:
+```text
+local_experiments/translation_bidirectional/
+```
+Then:
+```bash
+cd translation_bidirectional
+ball_project run
+```
+To place the derived project in another existing parent directory:
+```bash
+ball_project derive translation_bidirectional \
+  --from /path/to/translation_trial \
+  --parent /path/to/other_experiments
+```
+
 ## Repository development
 
 Run tests from `eventBased_worldModels/ball_simulator`:
