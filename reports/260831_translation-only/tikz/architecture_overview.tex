@@ -1,0 +1,91 @@
+%\documentclass{article}
+%% Requires in the parent document preamble:
+%\usepackage{tikz}
+%\usetikzlibrary{arrows.meta,positioning,calc,fit}
+%\usepackage{amsmath,amssymb,bm}
+%\usepackage{rotating}
+%\begin{document}
+%
+%\begin{sidewaysfigure}
+\begin{tikzpicture}[
+  font=\small,
+  >=Latex,
+  box/.style={draw, rounded corners=2pt, align=center, minimum height=10mm,
+              fill=white, inner sep=4pt},
+  inference/.style={-{Latex}, thick, draw=black!65},
+  target/.style={-{Latex}, thick, dashed, draw=purple!80!black},
+  constraint/.style={-{Latex}, thick, dashed, draw=orange!90!black},
+  supervision/.style={-{Latex}, thick, dashed, draw=blue!75!black}
+]
+% Inference graph
+\node[box,draw=blue!75!black,fill=blue!5] (img)
+  {$\mathbf I_{1:T}$\\ \tiny$B\times T\times3\times256\times256$};
+\node[box,draw=blue!75!black,below=8mm of img] (coord)
+  {append $X,Y$\\ \tiny5 input channels};
+\node[box,draw=blue!75!black,below=8mm of coord] (feat)
+  {shared CNN\\$\mathbf F_t\in\mathbb R^{128\times16\times16}$};
+
+\node[box,draw=purple!75!black,above right=8mm and 8mm of feat] (kp)
+  {8 soft keypoints\\168 statistics};
+\node[box,draw=purple!75!black,right=5mm of kp] (z)
+  {content latent\\$\mathbf z_t\in\mathbb R^{256}$};
+\node[box,draw=purple!75!black,above=5mm of z] (znext)
+  {observed target latent\\$\mathbf z_{t+1}=E_z(\mathbf F_{t+1})$};
+
+\node[box,draw=teal!70!black,below right=8mm and 5mm of feat] (motion)
+  {$[\mathbf F_t,\mathbf F_{t+1},\dot{\mathbf F}_t]$\\ \tiny spatial motion encoder};
+\node[box,draw=teal!70!black,right=8mm of motion] (m)
+  {motion latent\\$\mathbf m_t\in\mathbb R^{256}$};
+\node[box,draw=teal!70!black,right=8mm of m] (transition)
+  {latent transition\\$\widehat{\mathbf z}_{t+1}=\mathbf z_t+\Delta t\,T_\theta(\mathbf m_t)$};
+
+\node[box,draw=orange!85!black,right=20mm of znext] (heads)
+  {state heads\\$\widehat{\mathbf p}_t=h_p(\mathbf z_t)$\\
+   $\widehat{\mathbf v}_t=h_v(\mathbf z_t,\mathbf z_{t+1},\mathbf m_t)$};
+\node[box,draw=orange!85!black,below=8mm of heads] (corrector)
+  {iterative metric corrector\\
+   $\mathbf r_t=\widehat{\mathbf p}_{t+1}-\widehat{\mathbf p}_t
+   -\Delta t\,\widehat{\mathbf v}_t$};
+
+% Training-only nodes
+\node[box,draw=purple!75!black,fill=purple!4,below=4mm of transition] (latentloss)
+  {latent prediction loss\\
+   $\mathcal L_{\mathrm{latent}}=\lVert\widehat{\mathbf z}_{t+1}-\mathbf z_{t+1}\rVert^2$};
+\node[box,draw=blue!75!black,fill=blue!4,right=4mm of heads] (gt)
+  {training targets only\\$\mathbf p_t^{\mathrm{gt}},\mathbf v_t^{\mathrm{gt}}$};
+\node[box,draw=purple!75!black,fill=purple!4,below=7mm of gt] (stateloss)
+  {state loss\\$\mathcal L_{\mathrm{state}}$};
+
+% Solid inference paths
+\draw[inference] (img)--(coord);
+\draw[inference] (coord)--(feat);
+\draw[inference] (feat)--(kp);
+\draw[inference] (kp)--(z);
+\draw[inference] (feat)--(motion);
+\draw[inference] (motion)--(m);
+\draw[inference] (m)--(transition);
+\draw[inference] (z.south east) -- ++(5mm,-5mm) |- (transition.west);
+\draw[inference] (znext.east) -- (heads.west);
+\draw[inference] (z.east) -- ++ (15mm, 15mm) |- (heads.west);
+\draw[inference] (m.north) -- ++ (0mm, 5mm) -- ++ (27mm, 0mm) |- (heads.west);
+\draw[inference] (heads)--(corrector);
+
+% Dashed learning targets and constraints
+\draw[target] (transition.south) -- (latentloss.north);
+\draw[target] (znext.south) |- (latentloss.west);
+\draw[constraint] (heads.south east) -- node[pos=0.5,left,font=\scriptsize,align=left]
+  {kinematic consistency\\and iterative refinement} (corrector.north east);
+\draw[supervision] (heads.east) -- (stateloss.west);
+\draw[supervision] (gt.south) -- (stateloss.north);
+
+% Legend
+\node[below left=45mm and 0mm of feat.south west,anchor=north west] (legend) {%
+\begin{tikzpicture}[baseline]
+  \draw[inference] (0,0)--(0.9,0); \node[right] at (0.95,0) {inference path};
+  \draw[target] (3.5,0)--(4.4,0); \node[right] at (4.45,0) {learning target};
+  \draw[constraint] (7.1,0)--(8.0,0); \node[right] at (8.05,0) {physics consistency};
+  \draw[supervision] (11.0,0)--(11.9,0); \node[right] at (11.95,0) {ground-truth supervision};
+\end{tikzpicture}};
+\end{tikzpicture}
+%\end{sidewaysfigure}
+%\end{document}

@@ -1,0 +1,5 @@
+\begin{tikzpicture}
+\begin{axis}[ybar,bar width=19pt,width=.9\textwidth,height=6cm,ylabel={Normalized headline value},symbolic x coords={Position RMSE (mm),Velocity RMSE (mm/s),Position $R^2\times100$,Worst velocity $R^2\times100$},xtick=data,x tick label style={rotate=18,anchor=east,font=\small},ymin=0,ymax=105,nodes near coords,nodes near coords align={vertical},grid=major,axis line style={draw=mid},tick style={draw=mid}]
+\addplot[fill=blue!70,draw=blue] coordinates {(Position RMSE (mm),1.42) (Velocity RMSE (mm/s),32.35) (Position $R^2\times100$,99.99) (Worst velocity $R^2\times100$,97.98)};
+\end{axis}
+\end{tikzpicture}
