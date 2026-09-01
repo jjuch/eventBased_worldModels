@@ -158,7 +158,6 @@ def trajectory_reports(records: list[dict], output: Path, count: int, seed: int)
     for label, record in selected:
         trajectory_plot(
             record,
-            time=record["time"],
             output=output / f"{label}_{record['trajectory_id']}_{record['start_frame']:06d}.png",
             title=f"{label}: trajectory {record['trajectory_id']}, start {record['start_frame']}",
         )
@@ -174,7 +173,7 @@ def intervention_report(module, loader, device, maximum_windows: int, seed: int)
         "repeated_last": [],
         "shuffled": [],
     }
-    motion_latents: dict[str, list[np.ndarray]]
+    motion_latents: dict[str, list[np.ndarray]] = {name: [] for name in accumulators}
     for batch in _limit_loader(loader, maximum_windows):
         images = batch["context_rgb"]
         relative_time = batch["context_time"] - batch["context_time"][:, :1]
