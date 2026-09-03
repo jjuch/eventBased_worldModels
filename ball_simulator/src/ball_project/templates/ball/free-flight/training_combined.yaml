@@ -1,0 +1,32 @@
+# Combined mode is provided for later use. Validate translation first.
+data_config: generated-at-runtime.yaml
+model:
+  task: combined
+  embedding_dim: 256
+  keypoints: 8
+  motion_dim: 256
+  decoder_hidden_dim: 256
+  refinement_hidden_dim: 128
+  refinement_iterations: 1
+  delta_momentum: 0.01
+  default_frame_dt: 0.01
+  dropout: 0.0
+  learning_rate: 0.0003
+  weight_decay: 0.05
+  position_weight: 1.0
+  velocity_weight: 1.0
+  latent_prediction_weight: 0.1
+  kinematic_weight: 0.01
+  reverse_weight: 0.1
+  variance_weight: 0.01
+  rotation_weight: 1.0
+  angular_velocity_weight: 1.0
+  world_angular_velocity: true
+training:
+  output_directory: generated-at-runtime
+  epochs: 100
+  devices: auto
+  precision: bf16-mixed
+  gradient_clip_norm: 1.0
+  deterministic: true
+  log_every_n_steps: 10

@@ -1,0 +1,51 @@
+width: 256
+height: 256
+fps: 100
+engine: BLENDER_EEVEE_NEXT
+samples: 32
+transparent_background: false
+source: observations
+frame_dt: 0.01
+fixed_visual_y_extent: 2.5
+wall_thickness: 0.06
+
+# Placeholder. `ball_renderer propose-camera` replaces location, target, and lens.
+camera:
+  location: [4.0, -5.0, 3.0]
+  target: [0.0, 0.0, 0.75]
+  focal_length_mm: 42.0
+  sensor_width_mm: 36.0
+
+environment:
+  representation: opaque
+  near_wall_alpha: 0.0
+  show_near_wall_frame: false
+  frame_thickness: 0.02
+  show_near_wall_grid: false
+  grid_spacing: 0.50
+  grid_thickness: 0.008
+  checkerboard_enabled: true
+  checker_size: 0.25
+  checker_contrast: 0.24
+  floor_margin: 0.10
+
+ball:
+  base_color: [0.78, 0.80, 0.84, 1.0]
+  roughness: 0.38
+  markers_enabled: true
+  marker_angular_radius_degree: 16.0
+  marker_surface_offset: 0.003
+
+lighting:
+  world_strength: 0.08
+  key_energy: 1400.0
+  key_size: 2.0
+  fill_energy: 160.0
+  fill_size: 3.0
+
+outputs:
+  rgb: true
+  depth: false
+  segmentation: false
+  preview_mp4: false
+  keep_exr: false

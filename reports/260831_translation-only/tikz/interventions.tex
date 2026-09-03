@@ -1,0 +1,8 @@
+\begin{tikzpicture}
+\begin{axis}[ybar,bar width=14pt,width=.9\textwidth,height=6cm,ylabel={Magnitude},symbolic x coords={Forward,Reversed,Repeat last,Shuffled},xtick=data,ymin=0,ymax=18,legend style={at={(0.5,-0.18)},anchor=north,legend columns=3},grid=major]
+\addplot[fill=blue!75,draw=blue] coordinates {(Forward,.645)(Reversed,.642)(Repeat last,.012)(Shuffled,.666)};
+\addplot[fill=orange!75,draw=orange] coordinates {(Forward,0)(Reversed,1.286)(Repeat last,.643)(Shuffled,.771)};
+\addplot[fill=purple!65,draw=purple] coordinates {(Forward,0)(Reversed,16.90)(Repeat last,12.57)(Shuffled,12.85)};
+\legend{Mean speed (m/s),Velocity change (m/s),Motion-latent change}
+\end{axis}
+\end{tikzpicture}

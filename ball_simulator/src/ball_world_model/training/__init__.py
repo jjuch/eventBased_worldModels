@@ -1,7 +1,8 @@
-from .observability_module import ObservabilityModule
-from .train_observability import train_observability
+from .kinematic_module import KinematicObservabilityModule, KinematicStatistics
+from .train_kinematic import train_kinematic
 
 __all__ = [
-    "ObservabilityModule",
-    "train_observability",
+    "KinematicObservabilityModule",
+    "KinematicStatistics",
+    "train_kinematic",
 ]

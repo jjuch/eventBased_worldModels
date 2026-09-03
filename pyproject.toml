@@ -1,0 +1,117 @@
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "event-based-world-models"
+version = "0.1.0"
+description = "World-model research for structured physical systems"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+
+dependencies = [
+  "numpy>=2.0,<2.3",
+  "scipy>=1.14",
+  "h5py>=3.11",
+  "pydantic>=2.8",
+  "PyYAML>=6.0",
+  "typer>=0.12",
+  "rich>=13.7",
+  "tqdm>=4.66",
+  "matplotlib>=3.9",
+]
+
+
+[project.optional-dependencies]
+world-model = [
+  "torch>=2.4",
+  "torchvision>=0.19",
+  "lightning>=2.4",
+  "hydra-core>=1.3",
+  "omegaconf>=2.3",
+  "pandas>=2.2",
+  "pyarrow>=17",
+  "pillow>=10",
+  "tensorboard>=2.17",
+]
+
+dev = [
+  "pytest>=8.2",
+  "pytest-cov>=5.0",
+  "ruff>=0.5",
+  "mypy>=1.10",
+]
+
+all = [
+  "event-based-world-models[world-model,dev]",
+]
+
+
+[project.scripts]
+ball_simulator = "ball_simulator.trajectories.cli:app"
+ball_renderer = "ball_simulator.rendering.cli:app"
+ball_world_model = "ball_world_model.cli:app"
+
+ball_project = "ball_project.cli:app"
+create_world_model = "ball_project.cli:create_entrypoint"
+run_experiment = "ball_project.cli:run_entrypoint"
+
+
+[tool.hatch.build.targets.wheel]
+packages = [
+  "ball_simulator/src/ball_simulator",
+  "ball_simulator/src/ball_world_model",
+  "ball_simulator/src/ball_project",
+]
+
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/README.md",
+  "/LICENSE",
+  "/pyproject.toml",
+  "/ball_simulator/src",
+  "/ball_simulator/configs",
+  "/ball_simulator/tests",
+]
+
+
+[tool.pytest.ini_options]
+pythonpath = [
+  "ball_simulator/src",
+]
+
+testpaths = [
+  "ball_simulator/tests",
+]
+
+addopts = [
+  "--strict-markers",
+  "--strict-config",
+]
+
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+src = [
+  "ball_simulator/src",
+]
+
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+]
+
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "ball_simulator/src"

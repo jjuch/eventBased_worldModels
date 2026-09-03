@@ -1,11 +1,13 @@
-from .frame_encoder import SmallFrameEncoder
-from .state_estimator import StateEstimator,StatePrediction
-from .temporal_encoder import TemporalContextEncoder
-
+from .kinematic_encoder import CoordinateAwareFrameEncoder
+from .kinematic_estimator import KinematicPrediction, KinematicStateEstimator, TaskKind
+from .latent_motion import MotionDiagnostics, RunningDeltaNormaliser, SpatialMotionEncoder
 
 __all__ = [
-    "SmallFrameEncoder",
-    "StateEstimator",
-    "StatePrediction",
-    "TemporalContextEncoder",
+    "CoordinateAwareFrameEncoder",
+    "KinematicPrediction",
+    "KinematicStateEstimator",
+    "TaskKind",
+    "MotionDiagnostics",
+    "RunningDeltaNormaliser",
+    "SpatialMotionEncoder",
 ]

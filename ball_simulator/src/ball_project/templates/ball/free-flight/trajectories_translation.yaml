@@ -1,0 +1,60 @@
+default_environment: free-flight
+
+environments:
+  free_flight:
+    side_plane:
+      surface_id: side_reference
+      point: [-2.5, 0.0, 0.0]
+      normal: [1.0, 0.0, 0.0]
+    rear_plane:
+      surface_id: rear_reference
+      point: [0.0, 2.5, 0.0]
+      normal: [0.0, -1.0, 0.0]
+    floor:
+      surface_id: floor_reference
+      point: [0.0, 0.0, -1.5]
+      normal: [0.0, 0.0, 1.0]
+
+# Fixed ball and material parameters. Only initial state varies.
+physics:
+  mass: {low: 0.20, high: 0.20}
+  radius: {low: 0.10, high: 0.10}
+  normal_stiffness: {low: 150000.0, high: 150000.0, scale: log}
+  normal_damping: {low: 0.30, high: 0.30}
+  tangential_stiffness_ratio: {low: 0.30, high: 0.30}
+  tangential_damping_ratio: {low: 0.20, high: 0.20}
+  friction: {low: 0.50, high: 0.50}
+  drag_coefficient: {low: 0.0, high: 0.0}
+  air_density: 1.225
+  magnus_coefficient: {low: 0.0, high: 0.0}
+  rotational_drag: {low: 0.0, high: 0.0}
+
+free_flight_initial_state:
+  mode: translation
+  x_position: {low: -0.35, high: 0.35}
+  y_position: {low: -0.35, high: 0.35}
+  z_position: {low: 0.35, high: 0.95}
+  x_speed: {low: -0.75, high: 0.75}
+  y_speed: {low: -0.75, high: 0.75}
+  z_speed: {low: -0.50, high: 0.50}
+  spin: {low: 0.0, high: 0.0}
+  fixed_position: [0.0, 0.0, 0.65]
+  safety_margin: 0.20
+  maximum_sampling_attempts: 1000
+
+simulation:
+  duration: 0.30
+  internal_dt: 0.001
+  observation_dt: 0.01
+  high_rate_dt: null
+  gravity: [0.0, 0.0, 0.0]
+  penetration_tolerance: 1.0e-12
+
+# The project runner overrides output using project.yaml.
+dataset:
+  trajectories: 5000
+  seed: 42
+  output: trajectories.h5
+  compression: gzip
+  compression_level: 4
+  store_high_rate: false

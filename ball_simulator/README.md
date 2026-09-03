@@ -33,6 +33,11 @@ python -m pip install -e ".[world-model,dev]"
 ball_simulator validate-config configs/poc.yaml
 ball_simulator generate configs/poc.yaml --environment single-wall --output single_wall.h5 --workers 0
 ball_simulator generate configs/poc.yaml --environment u-box --output u_box.h5 --workers 0
+ball\_simulator generate \\
+  configs/kinematic/translation_free_flight.yaml \\
+  --environment free-flight \\
+  --output data/translation_free_flight.h5 \\
+  --workers 0
 pytest -q
 ```
 
@@ -78,6 +83,37 @@ ffmpeg -version
 ```
 This will show you the version and the path. If it isn't on the path you can use `--blender-executable` followed by the absolute path to blender, but it is preferred to have it installed on the path.
 
+### Assign an optimal camera viewpoint
+Based on a dataset an optimal camera viewpoint can be automatically assigned. This will ensure that the ball is clearly visible for all trajectories.
+```bash
+ball\_renderer propose-camera \\
+  data/translation_free_flight.h5 \\
+  --config configs/kinematic/render_translation.yaml \\
+  --output configs/kinematic/render_translation_optimised.yaml \\
+  --report inspection/translation_camera.json \\
+  --minimum-diameter-px 35 \\
+  --target-diameter-px 70
+```
+
+`propose-camera` searches a deterministic grid of:
+```text
+azimuth
+elevation
+distance
+focal length
+```
+Every candidate projects sampled sphere centers and radii from the complete HDF5 dataset. Candidates are rejected when:
+ * any sphere lies behind the camera;
+ * any sphere silhouette violates the image margin;
+ * the minimum apparent diameter is below the requested threshold.
+Surviving candidates are scored using:
+ * closeness to the target apparent diameter;
+ * image margin;
+ * conditioning of the map from world `(x, y, z)` to image `(u, v, log diameter)`.
+
+The routine writes the selected `location`, `target`, and `focal_length_mm` into a copied render YAML. The original render YAML remains unchanged. Camera selection is fixed per dataset, never per trajectory, so framing cannot leak state into the model.This is a proposal routine, not a claim of continuous global optimality. It selects the best camera within a broad deterministic candidate sweep and records the complete score report.
+Always render and visually inspect several representative trajectories before launching the full render.
+
 ### Render a single path
 To run a single trajectory render do:
 ```bash
@@ -121,15 +157,71 @@ ball_world_model inspect-data \
 
 ### Train observability
 Train the ten-frame visual state-estimation prerequisite baseline. It tests whether the ball’s position, orientation, linear velocity, and angular velocity can actually be inferred from the rendered video.
+
+1. Translation-only dataset
+Use:
+* no collisions during the complete context;
+* zero angular velocity;
+* fixed orientation;
+* initially zero gravity and constant linear velocity;
+* fixed ball radius for the first experiment;
+* oblique fixed camera;
+* checkerboard reference planes with known square size;
+* the ball completely visible in all frames.
+
 ```bash
-ball_world_model train-observability \
-  --config ball_simulator/src/ball_world_model/configs/experiment/observability.yaml
+ball_world_model train-kinematic \
+  -c src/ball_world_model/configs/experiment/translation_observer.yaml
 ```
-After training inspect with:
-```bash
-tensorboard --logdir outputs/observability
+Important TensorBoard metrics:
+```text
+validation/position_rmse_m
+validation/velocity_rmse_mps
+validation/translation_consistency_m
 ```
 
+2. Rotation-only dataset
+Use:
+* fixed ball center;
+* zero linear velocity;
+* zero gravity;
+* constant random angular velocity;
+* random initial orientation;
+* four unique tetrahedral markers;
+* a large apparent ball diameter in the 256x256 model input.
+
+```bash
+ball_world_model train-kinematic \
+  -c src/ball_world_model/configs/experiment/rotation_observer.yaml
+```
+Important metrics:
+```text
+validation/orientation_deg
+validation/omega_rmse_radps
+validation/rotation_consistency_deg
+```
+
+3. Combined dataset
+Use translation and rotation together, still without contact. Add gravity only after the zero-gravity combined experiment succeeds.
+Update the `root` and `manifest_path` fields in the three data YAML files if your actual locations differ.
+
+```bash
+ball_world_model train-kinematic \
+  -c src/ball_world_model/configs/experiment/combined_observer.yaml
+```
+Open TensorBoard with:
+```bash
+tensorboard --logdir outputs
+```
+
+#### Geometric bias used by this patch
+The observer predicts a six-dimensional continuous rotation representation and maps it to a valid rotation matrix. Orientation is evaluated intrinsically on SO(3). It also predicts a state at every context frame. Adjacent predictions are regularized using:
+```text
+p[t+1] approximately p[t] + dt * v[t]
+R[t+1] approximately Exp(dt * omega[t]) @ R[t]
+```
+The second convention matches the current simulator's world-coordinate angular velocity. If that simulator convention changes, set `world_angular_velocity: false` in the experiment YAML.
+The consistency losses are intentionally soft, with weight `0.1`. The model remains free to fit rendering and numerical imperfections. This is not a hard TSE(3) architecture.
 
 ## HDF5 layout
 

@@ -6,7 +6,12 @@ from scipy.spatial.transform import Rotation
 
 from .config import ExperimentConfig, Range
 from .models import RigidBodyState, SphereParameters
-from .environments import SimulationEnvironment, SingleWallEnvironment, UBoxEnvironment
+from .environments import (
+    SimulationEnvironment, 
+    SingleWallEnvironment, 
+    UBoxEnvironment,
+    FreeFlightEnvironment,
+)
 
 
 def sample_range(spec: Range, rng: np.random.Generator) -> float:
@@ -243,6 +248,108 @@ class UBoxInitialStateSampler(InitialStateSampler):
         )
 
 
+class FreeFlightInitialStateSampler(InitialStateSampler):
+    def __init__(
+        self,
+        config: ExperimentConfig,
+        environment: FreeFlightEnvironment,
+        rng: np.random.Generator,
+    ) -> None:
+        super().__init__(config, rng)
+        self.environment = environment
+
+
+    def _minimum_clearance(
+        self,
+        position: np.ndarray,
+        velocity: np.ndarray,
+        radius: float,
+        surface,
+    ) -> float:
+        """Exact minimum sphere-plane clearance for constant acceleration."""
+        duration = float(self.config.simulation.duration)
+        gravity = np.asarray(self.config.simulation.gravity, dtype=float)
+        relative = position - surface.point
+        a = 0.5 * float(np.dot(surface.normal, gravity))
+        b = float(np.dot(surface.normal, velocity))
+        c = float(np.dot(surface.normal, relative)) - radius
+        candidates = [0.0, duration]
+        if abs(a) > 1.0e-14:
+            stationary_time = -b / (2.0 * a)
+            if 0.0 < stationary_time < duration:
+                candidates.append(stationary_time)
+        return min(a * t * t + b * t + c for t in candidates)
+
+    def _is_safe(
+        self,
+        position: np.ndarray,
+        velocity: np.ndarray,
+        radius: float,
+    ) -> bool:
+        margin = self.config.free_flight_initial_state.safety_margin
+        return all(
+            self._minimum_clearance(position, velocity, radius, surface) > margin
+            for surface in self.environment.surfaces
+        )
+
+
+    def _sample_position(self) -> np.ndarray:
+        ranges = self.config.free_flight_initial_state
+        if ranges.mode == "rotation":
+            return np.asarray(ranges.fixed_position, dtype=float)
+        return np.asarray(
+            [
+                sample_range(ranges.x_position, self.rng),
+                sample_range(ranges.y_position, self.rng),
+                sample_range(ranges.z_position, self.rng),
+            ],
+            dtype=float,
+        )
+
+    def _sample_velocity(self) -> np.ndarray:
+        ranges = self.config.free_flight_initial_state
+        if ranges.mode == "rotation":
+            return np.zeros(3, dtype=float)
+        return np.asarray(
+            [
+                sample_range(ranges.x_speed, self.rng),
+                sample_range(ranges.y_speed, self.rng),
+                sample_range(ranges.z_speed, self.rng),
+            ],
+            dtype=float,
+        )
+
+    def sample(self, params: SphereParameters) -> RigidBodyState:
+        ranges = self.config.free_flight_initial_state
+        for _ in range(ranges.maximum_sampling_attempts):
+            position = self._sample_position()
+            velocity = self._sample_velocity()
+            if not self._is_safe(position, velocity, params.radius):
+                continue
+
+            if ranges.mode == "translation":
+                quaternion = np.asarray([0.0, 0.0, 0.0, 1.0], dtype=float)
+                angular_velocity = np.zeros(3, dtype=float)
+            else:
+                quaternion = Rotation.random(
+                    random_state=self.rng,
+                ).as_quat(canonical=False)
+                angular_velocity = sample_angular_velocity(ranges.spin, self.rng)
+
+            return RigidBodyState(
+                position=position,
+                quaternion_xyzw=quaternion,
+                linear_velocity=velocity,
+                angular_velocity=angular_velocity,
+            )
+
+        raise RuntimeError(
+            "Could not sample a collision-free free-flight trajectory. "
+            "Reduce position/velocity ranges, increase reference-plane distance, "
+            "or reduce safety_margin."
+        )
+
+
 class InitialStateSamplerFactory:
     @staticmethod
     def create(
@@ -257,6 +364,11 @@ class InitialStateSamplerFactory:
         
         if isinstance(environment, UBoxEnvironment):
             return UBoxInitialStateSampler(
+                config, environment, rng
+            )
+
+        if isinstance(environment, FreeFlightEnvironment):
+            return FreeFlightInitialStateSampler(
                 config, environment, rng
             )
         
@@ -289,28 +401,3 @@ class ParameterSampler:
             magnus_coefficient=sample_range(p.magnus_coefficient, self.rng),
             rotational_drag=sample_range(p.rotational_drag, self.rng),
         )
-
-
-    def sample_initial_state(self, params: SphereParameters) -> RigidBodyState:
-        """DEPRECATED"""
-        # DEPRECATED as there are now different configurations.
-        s = self.config.initial_state
-        point = np.asarray(self.config.simulation.wall_point)
-        normal = np.asarray(self.config.simulation.wall_normal, dtype=float)
-        normal /= np.linalg.norm(normal)
-        # This sampler assumes the default x-normal wall for intuitive ranges.
-        if not np.allclose(normal, [1.0, 0.0, 0.0]):
-            raise NotImplementedError("Initial-state sampler currently expects wall_normal=[1,0,0]")
-        position = point + np.array([
-            params.radius + sample_range(s.wall_gap, self.rng),
-            sample_range(s.lateral_position, self.rng),
-            sample_range(s.vertical_position, self.rng),
-        ])
-        velocity = np.array([
-            -sample_range(s.wall_normal_speed, self.rng),
-            sample_range(s.tangential_speed, self.rng),
-            sample_range(s.tangential_speed, self.rng),
-        ])
-        omega = np.array([sample_range(s.spin, self.rng) for _ in range(3)])
-        quaternion = Rotation.random(random_state=self.rng).as_quat(canonical=False)
-        return RigidBodyState(position, quaternion, velocity, omega)

@@ -12,7 +12,8 @@ from ball_world_model.data.dataset import RenderedTrajectoryDataset, build_datal
 from ball_world_model.data.discovery import validate_trajectory
 from ball_world_model.data.inspection import describe_batch, save_batch_inspection
 from ball_world_model.data.manifest import build_manifest, load_manifest, save_manifest
-from ball_world_model.training import train_observability
+from ball_world_model.training import train_kinematic
+from .evaluation_cli import register_evaluation_command
 
 
 app = typer.Typer(
@@ -138,8 +139,8 @@ def inspect_data_command(
     print(f"[green]Saved batch inspection:[/green] {saved.resolve()}")
 
 
-@app.command("train-observability")
-def train_observability_command(
+@app.command("train-kinematic")
+def train_kinematic_command(
     config: Annotated[
         Path,
         typer.Option(
@@ -150,6 +151,9 @@ def train_observability_command(
         ),
     ],
 ) -> None:
-    """Train the ten-frame visual state-estimation prerequisite baseline."""
-    checkpoint = train_observability(config)
+    """Train translation-only, rotation-only, or combined temporal observers."""
+    checkpoint = train_kinematic(config)
     print(f"[green]Best checkpoint:[/green] {checkpoint.resolve()}")
+
+
+register_evaluation_command(app)
