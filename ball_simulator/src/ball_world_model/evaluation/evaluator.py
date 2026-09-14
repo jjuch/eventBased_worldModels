@@ -22,6 +22,7 @@ from .metrics import (
     effective_rank,
 )
 from .model_loader import denormalised_prediction, load_kinematic_module
+from .rotation_evaluator import evaluate_loaded_rotation_observer
 from .plots import component_scatter, error_vs_speed, probe_plot, trajectory_plot
 
 
@@ -327,6 +328,17 @@ def evaluate_kinematic_observer(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     module = load_kinematic_module(checkpoint_path, device=device)
+    if module.hparams.task == "rotation":
+        return evaluate_loaded_rotation_observer(
+            module=module,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            checkpoint_path=checkpoint_path,
+            training_config_path=training_config_path,
+            output=output,
+            settings=settings,
+        )
 
     records = collect_predictions(module, test_loader, device, settings.maximum_test_windows)
     summary = aggregate_report(records, output)

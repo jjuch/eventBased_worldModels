@@ -87,8 +87,8 @@ large std ratio:
 ```
 For iterative correction, compare:
 ```text
-validation/refinement_residual_0_m
-validation/refinement_residual_1_m
-validation/refinement_residual_2_m
+validation/linear_refinement_residual_0_m
+validation/linear_refinement_residual_1_m
+validation/linear_refinement_residual_2_m
 ```
 Only fields corresponding to configured iterations are emitted.

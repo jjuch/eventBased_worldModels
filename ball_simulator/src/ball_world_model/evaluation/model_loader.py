@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-
 import torch
 
 from ball_world_model.training.kinematic_module import (
@@ -40,6 +39,8 @@ _ALLOWED_HYPERPARAMETERS = {
     "variance_weight",
     "rotation_weight",
     "angular_velocity_weight",
+    "rotation_kinematic_weight",
+    "rotation_reverse_weight",
     "state_weight",
     "translation_consistency_weight",
     "rotation_consistency_weight",

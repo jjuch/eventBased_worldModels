@@ -3,14 +3,26 @@ data_config: generated-at-runtime.yaml
 model:
   task: rotation
   embedding_dim: 256
-  temporal_depth: 4
   keypoints: 8
+  motion_dim: 256
+  decoder_hidden_dim: 256
+  refinement_hidden_dim: 128
+  refinement_iterations: 1
+  delta_momentum: 0.01
+  default_frame_dt: 0.01
   dropout: 0.0
   learning_rate: 0.0003
   weight_decay: 0.05
-  state_weight: 1.0
-  translation_consistency_weight: 0.0
-  rotation_consistency_weight: 0.1
+  position_weight: 0.0
+  velocity_weight: 0.0
+  kinematic_weight: 0.0
+  reverse_weight: 0.0
+  latent_prediction_weight: 0.1
+  variance_weight: 0.01
+  rotation_weight: 1.0
+  angular_velocity_weight: 1.0
+  rotation_kinematic_weight: 0.01
+  rotation_reverse_weight: 0.1
   world_angular_velocity: true
 training:
   output_directory: generated-at-runtime
