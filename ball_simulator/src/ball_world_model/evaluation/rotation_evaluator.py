@@ -40,8 +40,14 @@ def _write_csv(path, rows):
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames: list[str] = []
+    for row in rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+
     with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="raise")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -57,7 +63,7 @@ def _six_to_matrix(value):
     first, second = value[..., :3], value[..., 3:]
     first = first / np.clip(np.linalg.norm(first, axis=-2, keepdims=True), 1e-12, None)
     second = second - np.sum(first * second, axis=-1, keepdims=True) * first
-    second = second / np.clip(np.linalg(second, axis=-1, keepdims=True), 1e-12, None)
+    second = second / np.clip(np.linalg.norm(second, axis=-1, keepdims=True), 1e-12, None)
     third = np.cross(first, second)
     return np.stack((first, second, third), axis=-1)
 
@@ -148,15 +154,30 @@ def _aggregate(records, output):
         "maximum_deg": float(np.rad2deg(error.max())),
         "count": int(error.size),
     }
-    rows = [
-        {"quantity": "orientation", "component": key, "value": value}
-        for key, value in orientation.items()
-    ]
+    rows: list[dict[str, object]] = []
+    for metric_name, metric_value in orientation.items():
+        rows.append(
+            {
+                "quantity": "orientation",
+                "component": "all",
+                "metric": metric_name,
+                "value": metric_value,
+            }
+        )
+
     omega_summary = {}
     for component, axis in enumerate(("x", "y", "z")):
-        metric = regression_metrics(target_omega[:, component], predicted_omega[:, component])
-        rows.append({"quantity": "angular_velocity", "component": axis, **metric})
-        omega_summary[axis] = metric
+        metrics = regression_metrics(target_omega[:, component], predicted_omega[:, component])
+        omega_summary[axis] = metrics
+        for metric_name, metric_value in metrics.items():
+            rows.append(
+                {
+                    "quantity": "angular_velocity", 
+                    "component": axis,
+                    "metric": metric_name,
+                    "value": metric_value,
+                })
+
     _write_csv(output / "aggregate_metrics.csv", rows)
     return {"orientation": orientation, "angular_velocity": omega_summary}
 
