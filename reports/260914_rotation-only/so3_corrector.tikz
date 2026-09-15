@@ -1,0 +1,28 @@
+\begin{tikzpicture}[
+  node distance=9mm and 11mm,
+  box/.style={draw=blue!55!black, fill=blue!5, rounded corners, align=center, minimum height=10mm, minimum width=27mm},
+  res/.style={draw=red!60!black, fill=red!6, rounded corners, align=center, minimum height=10mm, minimum width=30mm},
+  upd/.style={draw=green!50!black, fill=green!7, rounded corners, align=center, minimum height=10mm, minimum width=31mm},
+  arr/.style={-{Latex[length=2.5mm]}, thick}
+]
+\node[box] (r0) {$\hat R_t^{(k)}$};
+\node[box, below=of r0] (w) {$\hat\omega_t^{(k)}$};
+\node[box, below=of w] (r1) {$\hat R_{t+1}^{(k)}$};
+\node[box, right=20mm of w] (exp) {$R_{\rm exp}=\exp(\Delta t[\hat\omega_t^{(k)}]_\times)\hat R_t^{(k)}$};
+\node[res, right=of exp] (res) {$\rho_t^{(k)}=\frac12\operatorname{vee}(R_{t+1}R_{\rm exp}^{\mathsf T}-R_{\rm exp}R_{t+1}^{\mathsf T})$};
+\node[upd, right=of res] (mlp) {shared MLP\\$\delta\phi_t,\delta\phi_{t+1},\delta\omega_t$};
+\node[upd, above right=7mm and 10mm of mlp] (u0) {$R_t^{(k+1)}=\exp([\delta\phi_t]_\times)R_t^{(k)}$};
+\node[upd, right=10mm of mlp] (uw) {$\omega_t^{(k+1)}=\omega_t^{(k)}+\delta\omega_t$};
+\node[upd, below right=7mm and 10mm of mlp] (u1) {$R_{t+1}^{(k+1)}=\exp([\delta\phi_{t+1}]_\times)R_{t+1}^{(k)}$};
+\draw[arr] (r0)--(exp);
+\draw[arr] (w)--(exp);
+\draw[arr] (r1)-|(res);
+\draw[arr] (exp)--(res);
+\draw[arr] (r0.east) to[out=10,in=170] (mlp.west);
+\draw[arr] (w.east) to[out=0,in=180] (mlp.west);
+\draw[arr] (r1.east) to[out=-10,in=190] (mlp.west);
+\draw[arr] (res)--(mlp);
+\draw[arr] (mlp)--(u0);
+\draw[arr] (mlp)--(uw);
+\draw[arr] (mlp)--(u1);
+\end{tikzpicture}
