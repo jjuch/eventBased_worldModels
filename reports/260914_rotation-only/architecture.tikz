@@ -1,0 +1,47 @@
+\begin{tikzpicture}[
+  node distance=8mm and 10mm,
+  block/.style={draw=blue!55!black, fill=blue!5, rounded corners, align=center, minimum height=10mm, minimum width=25mm},
+  motion/.style={draw=orange!70!black, fill=orange!8, rounded corners, align=center, minimum height=10mm, minimum width=27mm},
+  state/.style={draw=green!50!black, fill=green!8, rounded corners, align=center, minimum height=10mm, minimum width=25mm},
+  loss/.style={draw=red!55!black, fill=red!5, rounded corners, dashed, align=center, minimum height=9mm},
+  arrow/.style={-{Latex[length=2.5mm]}, thick},
+  target/.style={-{Latex[length=2.5mm]}, dashed, red!70!black}
+]
+\node[block] (images) {$\mathbf I_{1:T}$\\$B\!\times\!T\!\times\!3\!\times\!256\!\times\!256$};
+\node[block, right=of images] (coord) {append $X,Y$\\5 input channels};
+\node[block, right=of coord] (cnn) {shared CNN\\$\mathbf F_t\in\mathbb R^{128\times16\times16}$};
+\node[block, right=of cnn] (key) {8 soft keypoints\\168 statistics};
+\node[block, right=of key] (content) {content latent\\$\mathbf z_t\in\mathbb R^{256}$};
+
+\node[motion, below=16mm of cnn] (diff) {$\dot{\mathbf F}_t$\\normalised feature rate};
+\node[motion, right=of diff] (motion) {$[\mathbf F_t,\mathbf F_{t+1},\dot{\mathbf F}_t]$\\motion encoder\\$\mathbf m_t\in\mathbb R^{256}$};
+\node[motion, right=of motion] (transition) {latent transition\\$\hat{\mathbf z}_{t+1}=\mathbf z_t+\Delta t\,T_\theta(\mathbf m_t)$};
+
+\node[state, below=18mm of key] (rot) {orientation head\\$\hat{\mathbf R}_t\in SO(3)$};
+\node[state, right=of rot] (omega) {angular-velocity head\\$\hat{\boldsymbol\omega}_t\in\mathbb R^3$};
+\node[state, right=of omega] (correct) {iterative $SO(3)$ corrector\\$\mathbf r_t=\log_{\rm b}(\hat R_{t+1}R_{\rm exp}^{\mathsf T})$};
+
+\node[loss, below=13mm of rot] (labels) {training targets only\\$\mathbf R_t^{\rm gt},\boldsymbol\omega_t^{\rm gt}$};
+\node[loss, below=13mm of transition] (latentloss) {joint-embedding loss\\$\|\hat{\mathbf z}_{t+1}-\operatorname{sg}(\mathbf z_{t+1})\|^2$};
+
+\draw[arrow] (images)--(coord);
+\draw[arrow] (coord)--(cnn);
+\draw[arrow] (cnn)--(key);
+\draw[arrow] (key)--(content);
+\draw[arrow] (cnn)--(diff);
+\draw[arrow] (diff)--(motion);
+\draw[arrow] (motion)--(transition);
+\draw[arrow] (content)|-(transition);
+\draw[arrow] (content)--(rot);
+\draw[arrow] (content)|-(omega);
+\draw[arrow] (motion)--(omega);
+\draw[arrow] (rot)--(correct);
+\draw[arrow] (omega)--(correct);
+\draw[target] (labels)--(rot);
+\draw[target] (labels)-|(omega);
+\draw[target] (transition)--(latentloss);
+
+\node[font=\footnotesize, blue!65!black, above=2mm of images] {observed RGB input};
+\node[font=\footnotesize, orange!75!black, below=2mm of motion] {directed temporal change};
+\node[font=\footnotesize, green!45!black, below=2mm of correct] {metric rotational state};
+\end{tikzpicture}

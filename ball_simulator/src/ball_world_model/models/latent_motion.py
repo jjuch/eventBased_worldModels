@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import torch
 from torch import nn
 
+from .rotation import matrix_to_rotation_6d, so3_exp, so3_residual_vector
+
 
 class RunningDeltaNormaliser(nn.Module):
     """Per-channel normalisation preserving the magnitude of temporal feature change."""
@@ -87,8 +89,8 @@ class LatentTransition(nn.Module):
         return self.network(motion)
 
 
-class SharedKinematicCorrector(nn.Module):
-    """One shared correction step driven by the forward kinematic residual."""
+class SharedTranslationalCorrector(nn.Module):
+    """One shared correction step driven by the translational forward kinematic residual."""
 
     def __init__(self, hidden_dim: int = 128) -> None:
         super().__init__()
@@ -123,15 +125,61 @@ class SharedKinematicCorrector(nn.Module):
         )
 
 
+class SharedRotationalCorrector(nn.Module):
+    """Shared SO(3) correction step for worldd-frame angular velocity."""
+
+    def __init__(self, hidden_dim: int = 128) -> None:
+        super().__init__()
+        self.network = nn.Sequential(
+            nn.Linear(18, hidden_dim),
+            nn.LayerNorm(hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, 9),
+        )
+
+        nn.init.zeros_(self.network[-1].weight)
+        nn.init.zeros_(self.network[-1].bias)
+
+
+    def forward(
+        self,
+        first_rotation: torch.Tensor,
+        second_rotation: torch.Tensor,
+        angular_velocity: torch.Tensor,
+        dt: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        expected_second = so3_exp(angular_velocity * dt) @ first_rotation
+        relative = second_rotation @ expected_second.transpose(-1, -2)
+        residual = so3_residual_vector(relative)
+        inputs = torch.cat(
+            (
+                matrix_to_rotation_6d(first_rotation),
+                matrix_to_rotation_6d(second_rotation),
+                angular_velocity,
+                residual,
+            ),
+            dim=-1,
+        )
+        correction = self.network(inputs)
+        delta_first, delta_second, delta_omega = correction.chunk(3, dim=-1)
+        return (
+            so3_exp(delta_first) @ first_rotation,
+            so3_exp(delta_second) @ second_rotation,
+            angular_velocity + delta_omega,
+            residual,
+        )
+
+
 @dataclass(frozen=True)
 class MotionDiagnostics:
-    raw_forward_difference: torch.Tensor
-    raw_forward_feature_rate: torch.Tensor
     normalised_forward_difference: torch.Tensor
     forward_motion: torch.Tensor
     backward_motion: torch.Tensor
     predicted_next_embedding: torch.Tensor
     predicted_previous_embedding: torch.Tensor
-    forward_velocity: torch.Tensor
-    backward_velocity: torch.Tensor
-    refinement_residuals: tuple[torch.Tensor, ...]
+    forward_velocity: torch.Tensor | None
+    backward_velocity: torch.Tensor | None
+    forward_angular_velocity: torch.Tensor | None
+    backward_angular_velocity: torch.Tensor | None
+    linear_refinement_residuals: tuple[torch.Tensor, ...]
+    rotational_refinement_residuals: tuple[torch.Tensor, ...]

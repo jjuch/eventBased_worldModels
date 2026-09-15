@@ -11,7 +11,8 @@ from .latent_motion import (
     LatentTransition,
     MotionDiagnostics,
     RunningDeltaNormaliser,
-    SharedKinematicCorrector,
+    SharedTranslationalCorrector,
+    SharedRotationalCorrector,
     SpatialMotionEncoder,
 )
 from .rotation import rotation_6d_to_matrix
@@ -51,6 +52,8 @@ class KinematicStateEstimator(nn.Module):
         position_std: torch.Tensor | None = None,
         velocity_mean: torch.Tensor | None = None,
         velocity_std: torch.Tensor | None = None,
+        angular_velocity_mean: torch.Tensor | None = None,
+        angular_velocity_std: torch.Tensor | None = None,
     ) -> None:
         super().__init__()
         del temporal_depth # Accepted for configuration compatibility
@@ -75,6 +78,14 @@ class KinematicStateEstimator(nn.Module):
             "velocity_std",
             torch.ones(3) if velocity_std is None else velocity_std.detach().float().clone(),
         )
+        self.register_buffer(
+            "angular_velocity_mean",
+            torch.zeros(3) if angular_velocity_mean is None else angular_velocity_mean.detach().float().clone(),
+        )
+        self.register_buffer(
+            "angular_velocity_std",
+            torch.ones(3) if angular_velocity_std is None else angular_velocity_std.detach().float().clone(),
+        )
 
         self.frame_encoder = CoordinateAwareFrameEncoder(
             embedding_dim=embedding_dim,
@@ -95,7 +106,9 @@ class KinematicStateEstimator(nn.Module):
 
         self.rotation_head = self._head(embedding_dim, decoder_hidden_dim, 6, dropout) if rotation else None
         self.omega_head = self._head(velocity_input_dim, decoder_hidden_dim, 3, dropout) if rotation else None
-        self.corrector = SharedKinematicCorrector(refinement_hidden_dim) if translation else None
+        self.linear_corrector = SharedTranslationalCorrector(refinement_hidden_dim) if translation else None
+        self.rotational_corrector = SharedRotationalCorrector(refinement_hidden_dim) if rotation else None
+
 
 
     @staticmethod
@@ -170,22 +183,23 @@ class KinematicStateEstimator(nn.Module):
         )
         forward_velocity = self.velocity_head(forward_input) if self.velocity_head is not None else None
         backward_velocity = self.velocity_head(backward_input) if self.velocity_head is not None else None
-        pair_omega = self.omega_head(forward_input) if self.omega_head is not None else None
+        forward_omega = self.omega_head(forward_input) if self.omega_head is not None else None
+        backward_omega = self.omega_head(backward_input) if self.omega_head is not None else None
 
-        # Optional refinement procedure - TODO implement for rotation as well
-        refinement_residuals: list[torch.Tensor] = []
+        # Optional refinement procedure
+        linear_refinement_residuals: list[torch.Tensor] = []
         if position is not None and forward_velocity is not None:
             # Heads predict normalised state. Iterative correction is performed in physical units so p[t+1] - p[t] - v[t] * dt is dimensionally meaningful.
             refined_position = position * self.position_std + self.position_mean
             refined_velocity = forward_velocity * self.velocity_std + self.velocity_mean
             for _ in range(self.refinement_iterations):
-                first, second, refined_velocity, residual = self.corrector(
+                first, second, refined_velocity, residual = self.linear_corrector(
                     refined_position[:, :-1],
                     refined_position[:, 1:],
                     refined_velocity,
                     dt,
                 )
-                refinement_residuals.append(residual)
+                linear_refinement_residuals.append(residual)
                 accumulated = torch.zeros_like(refined_position)
                 counts = torch.zeros_like(refined_position[..., :1])
                 accumulated[:, :-1] += first
@@ -196,19 +210,45 @@ class KinematicStateEstimator(nn.Module):
             position = (refined_position - self.position_mean) / self.position_std
             forward_velocity = (refined_velocity - self.velocity_mean) / self.velocity_std
 
+        rotational_refinement_residuals: list[torch.Tensor] = []
+        if rotation_matrix is not None and forward_omega is not None:
+            refined_rotation = rotation_matrix
+            refined_omega = forward_omega * self.angular_velocity_std + self.angular_velocity_mean
+            for _ in range(self.refinement_iterations):
+                first_rotation, second_rotation, refined_omega, residual = self.rotational_corrector(
+                    refined_rotation[:, :-1],
+                    refined_rotation[:, 1:],
+                    refined_omega,
+                    dt,
+                )
+                rotational_refinement_residuals.append(residual)
+                accumulated = torch.zeros_like(refined_rotation)
+                counts = torch.zeros_like(refined_rotation[..., :1, :1])
+                accumulated[:, :-1] += first_rotation
+                counts[:, :-1] += 1.0
+                accumulated[:, 1:] += second_rotation
+                counts[:, 1:] += 1.0
+                averaged = accumulated / counts.clamp_min(1.0)
+                averaged_6d = averaged[..., :, :2].transpose(-1, -2).reshape(
+                    averaged.shape[:-2] + (6,)
+                )
+                refined_rotation = rotation_6d_to_matrix(averaged_6d)
+            rotation_matrix = refined_rotation
+            forward_omega = (
+                refined_omega - self.angular_velocity_mean
+            ) / self.angular_velocity_std
+
         linear_velocity = (
             self._pair_velocity_to_frame_velocity(forward_velocity)
             if forward_velocity is not None
             else None
         )
         angular_velocity = (
-            self._pair_velocity_to_frame_velocity(pair_omega)
-            if pair_omega is not None
+            self._pair_velocity_to_frame_velocity(forward_omega)
+            if forward_omega is not None
             else None
         )
         diagnostics = MotionDiagnostics(
-            raw_forward_difference=difference,
-            raw_forward_feature_rate=feature_rate,
             normalised_forward_difference=normalised_difference,
             forward_motion=forward_motion,
             backward_motion=backward_motion,
@@ -216,7 +256,10 @@ class KinematicStateEstimator(nn.Module):
             predicted_previous_embedding=predicted_previous_embedding,
             forward_velocity=forward_velocity,
             backward_velocity=backward_velocity,
-            refinement_residuals=tuple(refinement_residuals),
+            forward_angular_velocity=forward_omega,
+            backward_angular_velocity=backward_omega,
+            linear_refinement_residuals=tuple(linear_refinement_residuals),
+            rotational_refinement_residuals=tuple(rotational_refinement_residuals),
         )
 
         return KinematicPrediction(

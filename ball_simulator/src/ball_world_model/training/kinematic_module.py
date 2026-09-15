@@ -71,6 +71,8 @@ class KinematicObservabilityModule(L.LightningModule):
         variance_weight: float = 0.01,
         rotation_weight: float = 1.0,
         angular_velocity_weight: float = 1.0,
+        rotation_kinematic_weight: float = 0.01,
+        rotation_reverse_weight: float = 0.1,
         state_weight: float | None = None,
         translation_consistency_weight: float | None = None,
         rotation_consistency_weight: float | None = None,
@@ -99,6 +101,8 @@ class KinematicObservabilityModule(L.LightningModule):
             position_std=statistics.position_std,
             velocity_mean=statistics.linear_velocity_mean,
             velocity_std=statistics.linear_velocity_std,
+            angular_velocity_mean=statistics.angular_velocity_mean,
+            angular_velocity_std=statistics.angular_velocity_std,
         )
 
         for name, value in asdict(statistics).items():
@@ -194,8 +198,8 @@ class KinematicObservabilityModule(L.LightningModule):
         }
         metrics.update(self._std_metrics(position, target_position, "position"))
         metrics.update(self._std_metrics(velocity, target_velocity, "velocity"))
-        for iteration, residual in enumerate(motion.refinement_residuals):
-            metrics[f"refinement_residual_{iteration}_m"] = torch.sqrt(torch.mean(residual**2))
+        for iteration, residual in enumerate(motion.linear_refinement_residuals):
+            metrics[f"linear_refinement_residual_{iteration}_m"] = torch.sqrt(torch.mean(residual**2))
         
         return total, metrics
 
@@ -210,36 +214,70 @@ class KinematicObservabilityModule(L.LightningModule):
                 target_omega, self.angular_velocity_mean, self.angular_velocity_std
             ),
         )
-        omega = self._denormalise(
-            prediction.angular_velocity,
-            self.angular_velocity_mean,
-            self.angular_velocity_std,
+
+        motion = prediction.motion
+        target_latent = prediction.frame_latent.detach()
+        forward_latent_loss = F.mse_loss(
+            motion.predicted_next_embedding, target_latent[:, 1:]
         )
-        # TODO: implement rotation so3 loss again
-        # dt = torch.diff(batch["context_time"], dim=1).unsqueeze(-1)
-        # increments = so3_exp(dt * omega[:, :-1])
-        # if self.hparams.world_angular_velocity:
-        #     expected_next_rotation = increments @ prediction.rotation_matrix[:, :-1]
-        # else:
-        #     expected_next_rotation = prediction.rotation_matrix[:, :-1] @ increments
-        # rotation_consistency = rotation_geodesic_error(
-        #     prediction.rotation_matrix[:, 1:], expected_next_rotation
-        # ).mean()
+        backward_latent_loss = F.mse_loss(
+            motion.predicted_previous_embedding, target_latent[:, :-1]
+        )
+        latent_prediction_loss = 0.5 * (forward_latent_loss + backward_latent_loss)
+        reverse_loss = F.mse_loss(motion.backward_angular_velocity, -motion.forward_angular_velocity)
+        variance_loss = self._variance_floor_loss(prediction.frame_latent)
+        variance_loss = variance_loss + self._variance_floor_loss(motion.forward_motion)
+
+        omega = self._denormalise(
+            prediction.angular_velocity, self.angular_velocity_mean, self.angular_velocity_std
+        )
+        dt = torch.diff(batch["context_time"], dim=1).unsqueeze(-1)
+        expected_next_rotation = (
+            so3_exp(omega[:, :-1] * dt) @ prediction.rotation_matrix[:, :-1]
+        )
+        consistency_error = rotation_geodesic_error(
+            prediction.rotation_matrix[:, 1:], expected_next_rotation
+        )
+        kinematic_loss = consistency_error.square().mean()
+
         total = (
             self.hparams.rotation_weight * orientation_loss
             + self.hparams.angular_velocity_weight * omega_loss
+            + self.hparams.latent_prediction_weight * latent_prediction_loss
+            + self.hparams.rotation_kinematic_weight * kinematic_loss
+            + self.hparams.rotation_reverse_weight * reverse_loss
+            + self.hparams.variance_weight * variance_loss
         )
+
         metrics = {
+            "orientation_loss_rad": orientation_loss,
+            "omega_loss_normalised": omega_loss,
+            "latent_prediction_loss": latent_prediction_loss,
+            "forward_latent_loss": forward_latent_loss,
+            "backward_latent_loss": backward_latent_loss,
+            "reverse_omega_loss": reverse_loss,
+            "rotation_kinematic_loss_rad2": kinematic_loss,
+            "variance_loss": variance_loss,
             "orientation_deg": torch.rad2deg(orientation_error).mean(),
             "omega_rmse_radps": torch.sqrt(F.mse_loss(omega, target_omega)),
-            "orientation_loss": orientation_loss,
-            "omega_loss_normalised": omega_loss,
+            "rotation_kinematic_consistency_deg": torch.rad2deg(
+                torch.sqrt(kinematic_loss)
+            ),
+            "feature_delta_abs_mean": motion.normalised_forward_difference.abs().mean(),
+            "motion_std": motion.forward_motion.std(unbiased=False),
         }
-        return total, metrics
-    
+        metrics.update(self._std_metrics(omega, target_omega, "omega"))
+        for iteration, residual in enumerate(
+            motion.rotational_refinement_residuals
+        ):
+            metrics[f"rotational_refinement_residual_{iteration}"] = torch.sqrt(
+                residual.square().mean()
+            )
+        return total, metrics    
+
 
     def _step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
-        prediction = self.model(batch["context_rgb"])
+        prediction = self.model(batch["context_rgb"], batch["context_time"])
         loss = torch.zeros((), device=self.device)
         metrics: dict[str, torch.Tensor] = {}
 

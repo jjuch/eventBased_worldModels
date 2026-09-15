@@ -1,0 +1,248 @@
+{
+  "checkpoint": "/home/jasperj/Documents/projects/eventBased_worldModels/local_experiments/rotation_trial/outputs/training/checkpoints/best-051.ckpt",
+  "training_config": "/home/jasperj/Documents/projects/eventBased_worldModels/local_experiments/rotation_trial/.ball_project/effective/training.yaml",
+  "task": "rotation",
+  "device": "cuda",
+  "test_windows": 1050,
+  "aggregate": {
+    "orientation": {
+      "mean_deg": 0.5068461389101417,
+      "median_deg": 0.4676448952795011,
+      "p95_deg": 0.970485564529978,
+      "maximum_deg": 3.5235362405534514,
+      "count": 10500
+    },
+    "angular_velocity": {
+      "x": {
+        "rmse": 0.3682020518734494,
+        "mae": 0.2702118545912561,
+        "bias": 0.01037217345408031,
+        "r2": 0.9995770368027067,
+        "pearson": 0.9997940215128331,
+        "count": 10500
+      },
+      "y": {
+        "rmse": 0.7486657699977165,
+        "mae": 0.3249819257458051,
+        "bias": -0.03441419807786033,
+        "r2": 0.9981209958485177,
+        "pearson": 0.9990671345196502,
+        "count": 10500
+      },
+      "z": {
+        "rmse": 0.4176104005586603,
+        "mae": 0.2951060534396342,
+        "bias": -0.10046752379834652,
+        "r2": 0.9994304807866818,
+        "pearson": 0.9997427503478235,
+        "count": 10500
+      }
+    }
+  },
+  "interventions": [
+    {
+      "intervention": "forward",
+      "mean_angular_speed": 29.317859649658203,
+      "omega_delta_from_forward": 0.0,
+      "omega_reversal_error": 58.635719299316406,
+      "motion_delta_from_forward": 0.0,
+      "count": 9450
+    },
+    {
+      "intervention": "reversed",
+      "mean_angular_speed": 29.34893798828125,
+      "omega_delta_from_forward": 58.65882110595703,
+      "omega_reversal_error": 0.8159905076026917,
+      "motion_delta_from_forward": 15.826745986938477,
+      "count": 9450
+    },
+    {
+      "intervention": "repeated_last",
+      "mean_angular_speed": 0.38181912899017334,
+      "omega_delta_from_forward": 29.335979461669922,
+      "omega_reversal_error": 29.304519653320312,
+      "motion_delta_from_forward": 12.25782585144043,
+      "count": 9450
+    },
+    {
+      "intervention": "shuffled",
+      "mean_angular_speed": 34.573143005371094,
+      "omega_delta_from_forward": 39.50038528442383,
+      "omega_reversal_error": 41.86327362060547,
+      "motion_delta_from_forward": 12.708709716796875,
+      "count": 9450
+    }
+  ],
+  "probes": [
+    {
+      "representation": "content_last",
+      "quantity": "orientation",
+      "score": 1.2657660003410494,
+      "mean_deg": 1.2657660003410494,
+      "median_deg": 0.8922658350218295,
+      "p95_deg": 3.5540068454710587
+    },
+    {
+      "representation": "content_last",
+      "quantity": "angular_velocity",
+      "score": -0.10468837628610432,
+      "r2_x": -0.14462529352642317,
+      "r2_y": -0.09950584294731035,
+      "r2_z": -0.06993399238457942,
+      "rmse_x": 19.154313155663445,
+      "rmse_y": 18.110184636517133,
+      "rmse_z": 18.100709939367484
+    },
+    {
+      "representation": "content_difference",
+      "quantity": "orientation",
+      "score": 53.43069772005158,
+      "mean_deg": 53.43069772005158,
+      "median_deg": 46.9013757599783,
+      "p95_deg": 143.9674551109166
+    },
+    {
+      "representation": "content_difference",
+      "quantity": "angular_velocity",
+      "score": -0.05470111641555538,
+      "r2_x": -0.0651759693051992,
+      "r2_y": -0.05612609182726369,
+      "r2_z": -0.04280128811420325,
+      "rmse_x": 18.477601398538464,
+      "rmse_y": 17.749331197165223,
+      "rmse_z": 17.869726091747197
+    },
+    {
+      "representation": "spatial_map_last_mean",
+      "quantity": "orientation",
+      "score": 10.733736117556072,
+      "mean_deg": 10.733736117556072,
+      "median_deg": 6.799403563638513,
+      "p95_deg": 30.960090426304546
+    },
+    {
+      "representation": "spatial_map_last_mean",
+      "quantity": "angular_velocity",
+      "score": -0.048669961944898255,
+      "r2_x": -0.09993325111169593,
+      "r2_y": -0.01421956735903307,
+      "r2_z": -0.03185706736396576,
+      "rmse_x": 18.776648645279238,
+      "rmse_y": 17.39362488775681,
+      "rmse_z": 17.775707188938284
+    },
+    {
+      "representation": "spatial_feature_rate_mean",
+      "quantity": "orientation",
+      "score": 58.99192826911198,
+      "mean_deg": 58.99192826911198,
+      "median_deg": 47.47368813444738,
+      "p95_deg": 165.9558690132194
+    },
+    {
+      "representation": "spatial_feature_rate_mean",
+      "quantity": "angular_velocity",
+      "score": -0.03399094355917772,
+      "r2_x": -0.051257308358257925,
+      "r2_y": -0.02961699870141543,
+      "r2_z": -0.0210985236178598,
+      "rmse_x": 18.35648096149198,
+      "rmse_y": 17.52515869300526,
+      "rmse_z": 17.68279614882593
+    },
+    {
+      "representation": "motion_forward_mean",
+      "quantity": "orientation",
+      "score": 27.66413170885983,
+      "mean_deg": 27.66413170885983,
+      "median_deg": 17.000465108402405,
+      "p95_deg": 98.12527966364368
+    },
+    {
+      "representation": "motion_forward_mean",
+      "quantity": "angular_velocity",
+      "score": 0.9952157489663508,
+      "r2_x": 0.997177853450273,
+      "r2_y": 0.9918058494655312,
+      "r2_z": 0.9966635439832484,
+      "rmse_x": 0.9510967448727475,
+      "rmse_y": 1.5634214865260503,
+      "rmse_z": 1.010787396873715
+    },
+    {
+      "representation": "motion_backward_mean",
+      "quantity": "orientation",
+      "score": 25.80894815975339,
+      "mean_deg": 25.80894815975339,
+      "median_deg": 17.369629230862763,
+      "p95_deg": 83.86398929779632
+    },
+    {
+      "representation": "motion_backward_mean",
+      "quantity": "angular_velocity",
+      "score": 0.9951504401235024,
+      "r2_x": 0.9969942149382695,
+      "r2_y": 0.9926262893770519,
+      "r2_z": 0.995830816055186,
+      "rmse_x": 0.9815532718717908,
+      "rmse_y": 1.4830887898105696,
+      "rmse_z": 1.1299068577553177
+    },
+    {
+      "representation": "predicted_next_last",
+      "quantity": "orientation",
+      "score": 3.0770040201303512,
+      "mean_deg": 3.0770040201303512,
+      "median_deg": 2.516840744453825,
+      "p95_deg": 7.588424242691415
+    },
+    {
+      "representation": "predicted_next_last",
+      "quantity": "angular_velocity",
+      "score": -0.04028762724774319,
+      "r2_x": -0.053068797672312096,
+      "r2_y": -0.03202349411029748,
+      "r2_z": -0.03577058996061999,
+      "rmse_x": 18.372289772645043,
+      "rmse_y": 17.545627274811885,
+      "rmse_z": 17.80938423509979
+    }
+  ],
+  "representation_statistics": [
+    {
+      "representation": "content_last",
+      "mean_feature_std": 0.5107870697975159,
+      "effective_rank": 13.724956168069042
+    },
+    {
+      "representation": "content_difference",
+      "mean_feature_std": 0.7644472122192383,
+      "effective_rank": 12.818985507278496
+    },
+    {
+      "representation": "spatial_map_last_mean",
+      "mean_feature_std": 0.029525425285100937,
+      "effective_rank": 6.562249443507541
+    },
+    {
+      "representation": "spatial_feature_rate_mean",
+      "mean_feature_std": 0.020416095852851868,
+      "effective_rank": 8.314788968030337
+    },
+    {
+      "representation": "motion_forward_mean",
+      "mean_feature_std": 0.5128508806228638,
+      "effective_rank": 8.766417556267443
+    },
+    {
+      "representation": "motion_backward_mean",
+      "mean_feature_std": 0.5133674144744873,
+      "effective_rank": 8.710494085724102
+    },
+    {
+      "representation": "predicted_next_last",
+      "mean_feature_std": 0.5107231140136719,
+      "effective_rank": 13.66742050216462
+    }
+  ]
+}

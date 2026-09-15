@@ -39,7 +39,7 @@ def test_translation_model_returns_bidirectional_diagnostics():
     assert prediction.motion.predicted_previous_embedding.shape == (2, 9, 64)
     assert prediction.motion.forward_velocity.shape == (2, 9, 3)
     assert prediction.motion.backward_velocity.shape == (2, 9, 3)
-    assert len(prediction.motion.refinement_residuals) == 2
+    assert len(prediction.motion.linear_refinement_residuals) == 2
 
 
 def test_constant_frames_produce_negligible_feature_rate():

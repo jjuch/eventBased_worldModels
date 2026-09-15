@@ -26,6 +26,11 @@ def rotation_6d_to_matrix(rotation: torch.Tensor) -> torch.Tensor:
     return torch.stack((basis_1, basis_2, basis_3), dim=-1)
 
 
+def matrix_to_rotation_6d(matrix: torch.Tensor) -> torch.Tensor:
+    """Return the first two rotation-matrix columns as a continuous 6D target."""
+    return matrix[..., :, :2].transpose(-1, -2).reshape(matrix.shape[:-2] + (6,))
+
+
 def rotation_geodesic_error(
     predicted_matrix: torch.Tensor,
     target_matrix: torch.Tensor,
@@ -58,3 +63,18 @@ def so3_exp(angular_increment: torch.Tensor) -> torch.Tensor:
         (1.0 - torch.cos(theta)) / theta_squared.clamp_min(1.0e-16),
     )
     return identity + a[..., None] * skew + b[..., None] * (skew @ skew)
+
+
+def so3_residual_vector(relative_rotation: torch.Tensor) -> torch.Tensor:
+    """
+    Bounded tangent-like residual sin(theta) * axis from a relative rotation.
+    This avoids an unstable full logarithm near pi during early training. It is zero exactly when the rotations agree and has the correct first-order Lie-algebra limit.
+    """
+    return 0.5 * torch.stack(
+        (
+            relative_rotation[..., 2, 1] - relative_rotation[..., 1, 2],
+            relative_rotation[..., 0, 2] - relative_rotation[..., 2, 0],
+            relative_rotation[..., 1, 0] - relative_rotation[..., 0, 1],
+        ),
+        dim=-1
+    )
