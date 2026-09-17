@@ -7,6 +7,7 @@ from ball_world_model.training.kinematic_module import (
     KinematicObservabilityModule,
     KinematicStatistics,
 )
+from ball_world_model.training.structured_so3_module import StructuredSO3ObservabilityModule
 
 _STATISTIC_NAMES = (
     "position_mean",
@@ -45,6 +46,16 @@ _ALLOWED_HYPERPARAMETERS = {
     "translation_consistency_weight",
     "rotation_consistency_weight",
     "world_angular_velocity",
+    "latent_architecture",
+    "descriptor_dim",
+    "orientation_weight",
+    "omega_weight",
+    "carrier_weight",
+    "tangent_weight",
+    "group_weight",
+    "artifact_weight",
+    "amplitude_weight",
+    "geometric_channels",
 }
 
 def _statistics_from_state_dict(state_dict: dict[str, torch.Tensor]) -> KinematicStatistics:
@@ -69,7 +80,18 @@ def load_kinematic_module(
     statistics = _statistics_from_state_dict(state_dict)
     hyperparameters = dict(checkpoint.get("hyper_parameters", {}))
     arguments = {key: value for key, value in hyperparameters.items() if key in _ALLOWED_HYPERPARAMETERS}
-    module = KinematicObservabilityModule(statistics, **arguments)
+    module_class = (
+        StructuredSO3ObservabilityModule
+        if arguments.get("latent_architecture") == "structured_so3_artifacts"
+        else KinematicObservabilityModule
+    )
+    module_class_name = (
+        "StructuredSO3ObservabilityModule"
+        if arguments.get("latent_architecture") == "structured_so3_artifacts"
+        else "KinematicObservabilityModule"
+    )
+    print(f"[load_kinematic_module] The selected module class for training is: {module_class_name}")
+    module = module_class(statistics, **arguments)
     module.load_state_dict(state_dict, strict=True)
     module.eval()
     module.to(device)
