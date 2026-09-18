@@ -2,6 +2,9 @@
 data_config: generated-at-runtime.yaml
 model:
   task: rotation
+  latent_architecture: structured_so3_artifacts
+  geometric_channels: 24
+  physical_invariant_dim: 16
   embedding_dim: 256
   keypoints: 8
   motion_dim: 256
@@ -31,6 +34,8 @@ model:
   tangent_weight: 0.05
   group_weight: 0.1
   artifact_weight: 0.01
+  invariant_prediction_Weight: 0.01
+  invariant_variance_weight: 0.005
 training:
   output_directory: generated-at-runtime
   epochs: 75

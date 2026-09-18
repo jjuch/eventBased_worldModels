@@ -70,7 +70,10 @@ def test_structured_model_shapes_and_valid_group():
     assert prediction.frame_latent.shape == (2, 5, 64)
     assert prediction.motion.forward_motion.shape == (2, 4, 48)
     assert prediction.context_sectors.artifacts.shape[-1] == 18
-    assert prediction.motion.forward_sectors.artifact.shape[-1] == 5
+    assert prediction.motion.forward_sectors.artifacts.shape[-1] == 5
+    assert prediction.motion.predicted_next_invariants.shape == (2, 4, 8)
+    assert prediction.motion.predicted_previous_invariants.shape == (2, 4, 8)
+    assert prediction.motion.predicted_next_artifacts.shape == (2, 4, prediction.context_sectors.artifacts.shape[-1])
 
     identity = torch.eye(3).expand_as(prediction.rotation_matrix)
     torch.testing.assert_close(
@@ -79,7 +82,32 @@ def test_structured_model_shapes_and_valid_group():
         atol=1e-4,
         rtol=1e-4,
     )
-    assert torch.max(rotation_geodesic_error(
-        prediction.motion.predicted_next_rotation,
-        prediction.motion.predicted_next_rotation,
-    )) < 1e-3
+    assert torch.isfinite(prediction.motion.predicted_next_rotation).all()
+
+    next_rotation = prediction.motion.predicted_next_rotation
+    identity2 = torch.eye(3, device=next_rotation.device, dtype=next_rotation.dtype).expand_as(next_rotation)
+
+    torch.testing.assert_close(next_rotation.transpose(-1, -2) @ next_rotation, identity2, atol=1e-4, rtol=1e-4)
+
+    torch.testing.assert_close(
+        torch.linalg.det(next_rotation),
+        torch.ones_like(torch.linalg.det(next_rotation)),
+        atol=1e-4,
+        rtol=1e-4
+    )
+    torch.testing.assert_close(
+        prediction.motion.predicted_next_invariants,
+        prediction.context_sectors.physical_invariants[:, :-1]
+    )
+
+
+    target = prediction.context_sectors.physical_invariants[:, 1:].detach()
+    loss = torch.nn.functional.mse_loss(
+        prediction.motion.predicted_next_invariants,
+        target,
+    )
+    loss.backward()
+    assert any(
+        parameter.grad is not None and torch.isfinite(parameter.grad).all()
+        for parameter in model.invariant_transition.parameters()
+    )

@@ -66,7 +66,7 @@ class MotionSector:
     amplitude_rate: torch.Tensor
     carrier_tangent: torch.Tensor
     physical_invariants: torch.Tensor
-    artifact: torch.Tensor
+    artifacts: torch.Tensor
     packed: torch.Tensor
 
 
@@ -78,7 +78,7 @@ class RichLayout:
         self.context_artifact_dim = total_dim - self.context_structured_dim
         self.motion_artifact_dim = total_dim  - self.motion_structured_dim
         if min(self.context_artifact_dim, self.motion_artifact_dim) <= 0:
-            raise ValueError("total_sim is too small for the requested structured sectors.")
+            raise ValueError("total_dim is too small for the requested structured sectors.")
 
 
 class RichSO3ContextHead(nn.Module):

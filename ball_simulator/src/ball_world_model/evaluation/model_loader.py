@@ -37,7 +37,8 @@ _ALLOWED_HYPERPARAMETERS = {
     "latent_prediction_weight",
     "kinematic_weight",
     "reverse_weight",
-    "variance_weight",
+    "invariant_prediction_weight",
+    "invariant_variance_weight",
     "rotation_weight",
     "angular_velocity_weight",
     "rotation_kinematic_weight",
@@ -56,6 +57,7 @@ _ALLOWED_HYPERPARAMETERS = {
     "artifact_weight",
     "amplitude_weight",
     "geometric_channels",
+    "physical_invariant_dim",
 }
 
 def _statistics_from_state_dict(state_dict: dict[str, torch.Tensor]) -> KinematicStatistics:
@@ -111,11 +113,15 @@ def denormalised_prediction(module, prediction) -> dict[str, torch.Tensor]:
             module.linear_velocity_std,
         )
     if prediction.angular_velocity is not None:
-        result["angular_velocity"] = module._denormalise(
-            prediction.angular_velocity,
-            module.angular_velocity_mean,
-            module.angular_velocity_std,
-        )
+        if getattr(module, "outputs_physical_units", False):
+            print("[denormalise_prediction] The module does not denormalise the angular angular velocity.")
+            result["angular_velocity"] = prediction.angular_velocity
+        else:
+            result["angular_velocity"] = module._denormalise(
+                prediction.angular_velocity,
+                module.angular_velocity_mean,
+                module.angular_velocity_std,
+            )
     if prediction.rotation_matrix is not None:
         result["rotation_matrix"] = prediction.rotation_matrix
     return result

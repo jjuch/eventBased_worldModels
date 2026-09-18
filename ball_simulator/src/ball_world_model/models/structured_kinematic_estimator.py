@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import torch
 from torch import nn
 
 from .kinematic_encoder import CoordinateAwareFrameEncoder
 from .latent_motion import RunningDeltaNormaliser, SpatialMotionEncoder
-from .structured_so3 import RichSO3ContextHead, RichSO3MotionHead, world_step, orbit
+from .structured_so3 import RichSO3ContextHead, RichSO3MotionHead, world_step, orbit, MotionSector, ContextSectors
 
 @dataclass(frozen=True)
 class RichMotionDiagnostics:
@@ -19,10 +20,14 @@ class RichMotionDiagnostics:
     predicted_previous_embedding: torch.Tensor
     forward_angular_velocity: torch.Tensor
     backward_angular_velocity: torch.Tensor
-    forward_sectors: object
-    backward_sectors: object
+    forward_sectors: MotionSector
+    backward_sectors: MotionSector
     predicted_next_rotation: torch.Tensor
     predicted_previous_rotation: torch.Tensor
+    predicted_next_invariants: torch.Tensor
+    predicted_previous_invariants: torch.Tensor
+    predicted_next_artifacts: torch.Tensor
+    predicted_previous_artifacts: torch.Tensor
     linear_refinement_residuals: tuple = ()
     rotational_refinement_residuals: tuple = ()
 
@@ -37,7 +42,7 @@ class RichPrediction:
     frame_latent: torch.Tensor
     feature_maps: torch.Tensor
     motion: RichMotionDiagnostics
-    context_sectors: object
+    context_sectors: ContextSectors
 
 
 class StructuredSO3StateEstimator(nn.Module):
@@ -51,7 +56,7 @@ class StructuredSO3StateEstimator(nn.Module):
         physical_invariant_dim=16, 
         default_frame_dt=0.01, 
         delta_momentum=0.01, 
-        **_:object) -> None:
+        **_: object) -> None:
         super().__init__()
         self.default_frame_dt = float(default_frame_dt)
         self.frame_encoder = CoordinateAwareFrameEncoder(
@@ -64,75 +69,135 @@ class StructuredSO3StateEstimator(nn.Module):
         self.motion_encoder = SpatialMotionEncoder(channels, motion_dim)
         self.context_head = RichSO3ContextHead(descriptor_dim, embedding_dim, geometric_channels, physical_invariant_dim)
         self.motion_head = RichSO3MotionHead(motion_dim, motion_dim, geometric_channels, physical_invariant_dim)
-
-        la, lm = self.context_head.layout, self.motion_head.layout
-        self.artifact_transition = nn.Sequential(
-            nn.Linear(lm.motion_artifact_dim, la.context_artifact_dim),
-            nn.LayerNorm(la.context_artifact_dim),
-            nn.SiLU(),
-            nn.Linear(la.context_artifact_dim, la.context_artifact_dim)
+        context_layout = self.context_head.layout
+        motion_layout = self.motion_head.layout
+        self.invariant_transition = self._transition(
+            motion_layout.invariant_dim,
+            context_layout.invariant_dim
         )
+        self.artifact_transition = self._transition(
+            motion_layout.motion_artifact_dim,
+            context_layout.context_artifact_dim
+        )
+
+    @staticmethod
+    def _transition(input_dim: int, output_dim: int) -> nn.Module:
+        hidden = max(input_dim, output_dim, 16)
+        network = nn.Sequential(
+            nn.Linear(input_dim, hidden),
+            nn.LayerNorm(hidden),
+            nn.SiLU(),
+            nn.Linear(hidden, output_dim),
+        )
+        nn.init.zeros_(network[-1].weight)
+        nn.init.zeros_(network[-1].bias)
+        return network
 
 
     @staticmethod
     def _frame_velocity(pair: torch.Tensor) -> torch.Tensor:
         return torch.cat((pair, pair[:, -1:]), dim=1)
 
-    def _pack_context(self, r6, alpha, U, c, a):
-        return torch.cat((r6, alpha, U.flatten(-2), c, a), -1)
+    @staticmethod
+    def _pack_context(rotation_6d, amplitudes, carrier, invariants, artifacts):
+        return torch.cat(
+            (
+                rotation_6d,
+                amplitudes,
+                carrier.flatten(-2),
+                invariants,
+                artifacts,
+            ), dim=-1,
+        )
 
+    
     def forward(self, context_rgb, context_time=None) -> RichPrediction:
         maps = self.frame_encoder.encode_feature_maps(context_rgb)
         descriptor = self.frame_encoder.embeddings_from_maps(maps)
         context = self.context_head(descriptor)
         batch, frames = descriptor.shape[:2]
+        if frames < 2:
+            raise ValueError("At least two frames are required.")
+
 
         if context_time is None:
             context_time = (
                 torch.arange(frames, device=descriptor.device, dtype=descriptor.dtype) * self.default_frame_dt
             ).unsqueeze(0).expand(batch, -1)
 
-        dt = torch.diff(context_time.to(descriptor), 1).unsqueeze(-1).clamp_min(1e-8)
-        rate = (maps[:, 1:] - maps[:, :-1]) / dt.unsqueeze(-1).unsqueeze(-1)
-        norm = self.delta_normaliser(rate)
+        dt = torch.diff(context_time.to(descriptor), dim=1).unsqueeze(-1).clamp_min(1e-8)
+        raw_rate = (maps[:, 1:] - maps[:, :-1]) / dt.unsqueeze(-1).unsqueeze(-1)
+        normalised_rate = self.delta_normaliser(raw_rate)
 
-        f = self.motion_encoder(maps[:, :-1], maps[:, 1:], norm)
-        b = self.motion_encoder(maps[:, 1:], maps[:, :-1], -norm)
-        mf = self.motion_head(f, context.carrier[:, :-1])
-        mb = self.motion_head(b, context.carrier[:, 1:])
-        Rn = world_step(context.rotation[:, :-1], mf.omega, dt)
-        Rp = world_step(context.rotation[:, 1:], mb.omega, dt)
-        an = (context.amplitudes[:, :-1] + dt * mf.amplitude_rate).clamp_min(0.)
-        ap = (context.amplitudes[:, 1:] + dt * mb.amplitude_rate).clamp_min(0.)
-        Un = an.unsqueeze(-1) * orbit(Rn, self.context_head.templates)
-        Up = ap.unsqueeze(-1) * orbit(Rp, self.context_head.templates)
-        cn = context.physical_invariants[:, :-1]
-        cp = context.physical_invariants[:, 1:]
-        aa_n = context.artifacts[:, :-1] + dt * self.artifact_transition(mf.artifact)
-        aa_p = context.artifacts[:, 1:] + dt * self.artifact_transition(mb.artifact)
-        pn = self._pack_context(Rn[..., :, :2].transpose(-1, -2).flatten(-2), an, Un, cn, aa_n)
-        pp = self._pack_context(Rp[..., :, :2].transpose(-1, -2).flatten(-2), ap, Up, cp, aa_p)
-        diag = RichMotionDiagnostics(
-            normalised_forward_difference=norm, 
-            forward_motion=mf.packed, 
-            backward_motion=mb.packed, 
-            predicted_next_embedding=pn, 
-            predicted_previous_embedding=pp, 
-            forward_angular_velocity=mf.omega, 
-            backward_angular_velocity=mb.omega, 
-            forward_sectors=mf, 
-            backward_sectors=mb, 
-            predicted_next_rotation=Rn, 
-            predicted_previous_rotation=Rp
+        forward_features = self.motion_encoder(maps[:, :-1], maps[:, 1:], normalised_rate)
+        backward_features = self.motion_encoder(maps[:, 1:], maps[:, :-1], -normalised_rate)
+
+        forward = self.motion_head(forward_features, context.carrier[:, :-1])
+        backward = self.motion_head(backward_features, context.carrier[:, 1:])
+
+        next_rotation = world_step(context.rotation[:, :-1], forward.omega, dt)
+        previous_rotation = world_step(context.rotation[:, 1:], backward.omega, dt)
+
+        next_amplitudes = (context.amplitudes[:, :-1] + dt * forward.amplitude_rate).clamp_min(0.0)
+        previous_amplitudes = (context.amplitudes[:, 1:] + dt * backward.amplitude_rate).clamp_min(0.0)
+
+        next_carrier = next_amplitudes.unsqueeze(-1) * orbit(next_rotation, self.context_head.templates)
+        previous_carrier = previous_amplitudes.unsqueeze(-1) * orbit(previous_rotation, self.context_head.templates)
+
+        # These coordinates are invariant under changing the SO(3) basis, not constant in time. They may encode scalar observability/confidence and therefore receive a learned temporal rate from the invariant motion sector.
+        next_invariants = (
+            context.physical_invariants[:, :-1] + dt * self.invariant_transition(forward.physical_invariants)
+        )
+        previous_invariants = (
+            context.physical_invariants[:, 1:] + dt * self.invariant_transition(backward.physical_invariants)
+        )
+
+        next_artifacts = context.artifacts[:, :-1] + dt * self.artifact_transition(forward.artifacts)
+        previous_artifacts = context.artifacts[:, 1:] + dt * self.artifact_transition(backward.artifacts)
+
+        next_rotation_6d = next_rotation[..., :, :2].transpose(-1, -2).flatten(-2)
+        previous_rotation_6d = previous_rotation[..., :, :2].transpose(-1, -2).flatten(-2)
+
+        next_packed = self._pack_context(
+            next_rotation_6d,
+            next_amplitudes, 
+            next_carrier,
+            next_invariants,
+            next_artifacts,
+        )
+        previous_packed = self._pack_context(
+            previous_rotation_6d,
+            previous_amplitudes, 
+            previous_carrier,
+            previous_invariants,
+            previous_artifacts,
+        )
+        
+        diagnostics = RichMotionDiagnostics(
+            normalised_forward_difference=normalised_rate, 
+            forward_motion=forward.packed, 
+            backward_motion=backward.packed, 
+            predicted_next_embedding=next_packed, 
+            predicted_previous_embedding=previous_packed, 
+            forward_angular_velocity=forward.omega, 
+            backward_angular_velocity=backward.omega, 
+            forward_sectors=forward, 
+            backward_sectors=backward, 
+            predicted_next_rotation=next_rotation, 
+            predicted_previous_rotation=previous_rotation,
+            predicted_next_invariants=next_invariants,
+            predicted_previous_invariants=previous_invariants,
+            predicted_next_artifacts=next_artifacts,
+            predicted_previous_artifacts=previous_artifacts,
         )
         return RichPrediction(
             position=None, 
             linear_velocity=None, 
             rotation_6d=context.rotation_6d, 
             rotation_matrix=context.rotation, 
-            angular_velocity=self._frame_velocity(mf.omega), 
+            angular_velocity=self._frame_velocity(forward.omega), 
             frame_latent=context.packed, 
             feature_maps=maps, 
-            motion=diag, 
+            motion=diagnostics, 
             context_sectors=context
         )
