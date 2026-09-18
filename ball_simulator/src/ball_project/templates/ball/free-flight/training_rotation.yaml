@@ -34,7 +34,7 @@ model:
   tangent_weight: 0.05
   group_weight: 0.1
   artifact_weight: 0.01
-  invariant_prediction_Weight: 0.01
+  invariant_prediction_weight: 0.01
   invariant_variance_weight: 0.005
 training:
   output_directory: generated-at-runtime

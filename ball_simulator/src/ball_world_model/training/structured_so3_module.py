@@ -82,7 +82,7 @@ class StructuredSO3ObservabilityModule(L.LightningModule):
 
         # Lie exponentiation uses physical omega. Only the supervised residual is standardised so it remains numerically balanced with the other losses.
         omega_error_normalised = (motion.forward_sectors.omega - teacher_omega) / self.angular_velocity_std
-        omega_loss = omega_error_normalised.squared().mean()
+        omega_loss = omega_error_normalised.square().mean()
         omega_rmse_radps = torch.sqrt(
             F.mse_loss(motion.forward_sectors.omega, teacher_omega)
         )
