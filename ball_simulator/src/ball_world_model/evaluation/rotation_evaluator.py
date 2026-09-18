@@ -14,6 +14,7 @@ import torch
 from ball_world_model.models.rotation import quaternion_xyzw_to_matrix
 from .metrics import apply_linear_probe, effective_rank, fit_linear_probe, regression_metrics
 from .model_loader import denormalised_prediction
+from .structured_so3_evaluator import evaluate_structured_so3_latent
 
 
 def _numpy(value):
@@ -342,4 +343,16 @@ def evaluate_loaded_rotation_observer(
         "representation_statistics": statistics,
     }
     (output / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+
+    # test SO3 latent if available
+    if hasattr(module.model, "context_head"):
+        evaluate_structured_so3_latent(
+            module,
+            train_loader,
+            test_loader,
+            device,
+            output,
+            train_maximum=settings.maximum_probe_train_windows,
+            test_maximum=settings.maximum_test_windows,
+        )
     return output.resolve()
