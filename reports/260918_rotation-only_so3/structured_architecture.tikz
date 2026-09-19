@@ -1,0 +1,22 @@
+\begin{tikzpicture}[node distance=8mm and 9mm,
+box/.style={draw=blue!55!black,fill=blue!5,rounded corners,align=center,minimum height=9mm},
+geo/.style={draw=green!50!black,fill=green!7,rounded corners,align=center,minimum height=9mm},
+aux/.style={draw=orange!65!black,fill=orange!7,rounded corners,align=center,minimum height=9mm},
+arr/.style={-{Latex[length=2.4mm]},thick}]
+\node[box] (rgb) {RGB context\\$I_{1:T}$};
+\node[box,right=of rgb] (enc) {coordinate-aware CNN\\soft-keypoint descriptor};
+\node[geo,above right=7mm and 10mm of enc] (G) {$G_t\in SO(3)$\\6D chart};
+\node[geo,right=of G] (U) {$K=24$ carrier\\$u_{t,k}=\alpha_{t,k}G_tb_k$};
+\node[aux,right=of U] (c) {scalar sector\\$c_t\in\mathbb R^{16}$};
+\node[aux,right=of c] (a) {artifacts\\$a_t\in\mathbb R^{138}$};
+\node[box,below=18mm of enc] (me) {spatial pairwise\\motion encoder};
+\node[geo,right=of me] (w) {$\xi_t\in\mathfrak{so}(3)$};
+\node[geo,right=of w] (T) {$K=24$ tangents\\$\dot u_{t,k}=\xi_t\times u_{t,k}$};
+\node[aux,right=of T] (q) {scalar rates\\$q_t\in\mathbb R^{16}$};
+\node[aux,right=of q] (n) {motion artifacts\\$\nu_t\in\mathbb R^{141}$};
+\node[geo,below=17mm of U] (step) {$\hat G_{t+1}=\exp(\Delta t[\xi_t]_\times)G_t$};
+\node[aux,right=of step] (sstep) {$\hat c_{t+1}=c_t+\Delta t f_c(q_t)$};
+\node[aux,right=of sstep] (astep) {$\hat a_{t+1}=a_t+\Delta t f_a(\nu_t)$};
+\draw[arr](rgb)--(enc);\draw[arr](enc)--(G);\draw[arr](enc)--(U);\draw[arr](enc)--(c);\draw[arr](enc)--(a);\draw[arr](enc)--(me);
+\draw[arr](me)--(w);\draw[arr](me)--(T);\draw[arr](me)--(q);\draw[arr](me)--(n);\draw[arr](G)--(step);\draw[arr](w)--(step);\draw[arr](c)--(sstep);\draw[arr](q)--(sstep);\draw[arr](a)--(astep);\draw[arr](n)--(astep);
+\end{tikzpicture}
