@@ -36,6 +36,15 @@ model:
   artifact_weight: 0.01
   invariant_prediction_weight: 0.01
   invariant_variance_weight: 0.005
+  artifact_mode: physics_residual_adversarial
+  artifact_residual_weight: 0.01
+  artifact_cross_covariance_weight: 0.001
+  artifact_adversary_omega_weight: 0.01
+  artifact_adversary_rotation_weight: 0.005
+  artifact_adversary_max_strength: 0.02
+  artifact_adversary_warmup_epochs: 10
+  artifact_residual_hidden_channels: 128
+  artifact_adversary_hidden_dim: 128
 training:
   output_directory: generated-at-runtime
   epochs: 75
