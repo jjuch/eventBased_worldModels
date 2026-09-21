@@ -1,0 +1,295 @@
+{
+  "group_metrics": [
+    {
+      "metric": "orthogonality",
+      "unit": "frobenius",
+      "mean": 1.53531701130305e-07,
+      "median": 1.4869506514969544e-07,
+      "p95": 2.935349243671226e-07,
+      "maximum": 4.61697652553994e-07,
+      "count": 10500
+    },
+    {
+      "metric": "determinant",
+      "unit": "absolute",
+      "mean": 9.319895610815365e-08,
+      "median": 1.1920928955078125e-07,
+      "p95": 2.384185791015625e-07,
+      "maximum": 4.172325134277344e-07,
+      "count": 10500
+    },
+    {
+      "metric": "one_step",
+      "unit": "radian",
+      "mean": 0.01261142548173666,
+      "median": 0.010369558818638325,
+      "p95": 0.028396932408213615,
+      "maximum": 0.19533029198646545,
+      "count": 9450
+    },
+    {
+      "metric": "inverse",
+      "unit": "radian",
+      "mean": 0.0025231940671801567,
+      "median": 0.0022902425844222307,
+      "p95": 0.004955518525093794,
+      "maximum": 0.01431101094931364,
+      "count": 9450
+    }
+  ],
+  "rollout": [
+    {
+      "horizon_intervals": 1,
+      "mean_deg": 0.71454256772995,
+      "median_deg": 0.5914908647537231,
+      "p95_deg": 1.482143759727478
+    },
+    {
+      "horizon_intervals": 2,
+      "mean_deg": 0.9659226536750793,
+      "median_deg": 0.8242448568344116,
+      "p95_deg": 1.9451231956481934
+    },
+    {
+      "horizon_intervals": 3,
+      "mean_deg": 1.2080192565917969,
+      "median_deg": 1.0017104148864746,
+      "p95_deg": 2.457183361053467
+    },
+    {
+      "horizon_intervals": 4,
+      "mean_deg": 1.446805715560913,
+      "median_deg": 1.2017076015472412,
+      "p95_deg": 2.832066535949707
+    },
+    {
+      "horizon_intervals": 5,
+      "mean_deg": 1.688271164894104,
+      "median_deg": 1.3614248037338257,
+      "p95_deg": 3.396843671798706
+    },
+    {
+      "horizon_intervals": 6,
+      "mean_deg": 1.9055628776550293,
+      "median_deg": 1.5390055179595947,
+      "p95_deg": 3.7543153762817383
+    },
+    {
+      "horizon_intervals": 7,
+      "mean_deg": 2.0960919857025146,
+      "median_deg": 1.6663612127304077,
+      "p95_deg": 4.08225154876709
+    },
+    {
+      "horizon_intervals": 8,
+      "mean_deg": 2.2959673404693604,
+      "median_deg": 1.8163918256759644,
+      "p95_deg": 4.553741931915283
+    },
+    {
+      "horizon_intervals": 9,
+      "mean_deg": 2.465911626815796,
+      "median_deg": 1.9218289852142334,
+      "p95_deg": 4.956760406494141
+    }
+  ],
+  "sector_statistics": [
+    {
+      "sector": "rotation6d",
+      "dimension": 6,
+      "mean_feature_std": 0.7590198516845703,
+      "effective_rank": 5.8571889516451305
+    },
+    {
+      "sector": "carrier",
+      "dimension": 72,
+      "mean_feature_std": 0.5811388492584229,
+      "effective_rank": 8.909705536787865
+    },
+    {
+      "sector": "invariants",
+      "dimension": 16,
+      "mean_feature_std": 0.2864541709423065,
+      "effective_rank": 3.5786238228236122
+    },
+    {
+      "sector": "artifacts",
+      "dimension": 138,
+      "mean_feature_std": 0.3009120523929596,
+      "effective_rank": 5.223347326492176
+    },
+    {
+      "sector": "omega",
+      "dimension": 3,
+      "mean_feature_std": 17.380352020263672,
+      "effective_rank": 2.98174615220969
+    },
+    {
+      "sector": "tangent",
+      "dimension": 72,
+      "mean_feature_std": 9.662116050720215,
+      "effective_rank": 8.89626513343467
+    },
+    {
+      "sector": "motion_invariants",
+      "dimension": 16,
+      "mean_feature_std": 0.29907190799713135,
+      "effective_rank": 4.790408128138921
+    },
+    {
+      "sector": "motion_artifacts",
+      "dimension": 141,
+      "mean_feature_std": 0.528031051158905,
+      "effective_rank": 3.5608832171451
+    }
+  ],
+  "sector_omega_probes": [
+    {
+      "sector": "carrier",
+      "target": "angular_velocity",
+      "axis": "x",
+      "rmse": 18.349562787490196,
+      "r2": -0.05046510187645481
+    },
+    {
+      "sector": "carrier",
+      "target": "angular_velocity",
+      "axis": "y",
+      "rmse": 17.329995292999243,
+      "r2": -0.006812647523241289
+    },
+    {
+      "sector": "carrier",
+      "target": "angular_velocity",
+      "axis": "z",
+      "rmse": 17.82940880472386,
+      "r2": -0.0381011168182992
+    },
+    {
+      "sector": "invariants",
+      "target": "angular_velocity",
+      "axis": "x",
+      "rmse": 18.244739567042373,
+      "r2": -0.03849766466315474
+    },
+    {
+      "sector": "invariants",
+      "target": "angular_velocity",
+      "axis": "y",
+      "rmse": 17.165558006194612,
+      "r2": 0.012203178293784589
+    },
+    {
+      "sector": "invariants",
+      "target": "angular_velocity",
+      "axis": "z",
+      "rmse": 17.651793526007484,
+      "r2": -0.01752116174943885
+    },
+    {
+      "sector": "artifacts",
+      "target": "angular_velocity",
+      "axis": "x",
+      "rmse": 18.929347329107916,
+      "r2": -0.11789616799009472
+    },
+    {
+      "sector": "artifacts",
+      "target": "angular_velocity",
+      "axis": "y",
+      "rmse": 17.490488217336186,
+      "r2": -0.025547162790031663
+    },
+    {
+      "sector": "artifacts",
+      "target": "angular_velocity",
+      "axis": "z",
+      "rmse": 17.98058708685662,
+      "r2": -0.05578018821619901
+    },
+    {
+      "sector": "omega",
+      "target": "angular_velocity",
+      "axis": "x",
+      "rmse": 0.2882743213003501,
+      "r2": 0.999740736067551
+    },
+    {
+      "sector": "omega",
+      "target": "angular_velocity",
+      "axis": "y",
+      "rmse": 0.41192014135616717,
+      "r2": 0.9994311761091128
+    },
+    {
+      "sector": "omega",
+      "target": "angular_velocity",
+      "axis": "z",
+      "rmse": 0.266751627925153,
+      "r2": 0.9997676300687467
+    },
+    {
+      "sector": "tangent",
+      "target": "angular_velocity",
+      "axis": "x",
+      "rmse": 11.913696731777588,
+      "r2": 0.5571840364288366
+    },
+    {
+      "sector": "tangent",
+      "target": "angular_velocity",
+      "axis": "y",
+      "rmse": 12.437706875637485,
+      "r2": 0.48140012494599227
+    },
+    {
+      "sector": "tangent",
+      "target": "angular_velocity",
+      "axis": "z",
+      "rmse": 11.50897103700152,
+      "r2": 0.5674475594239853
+    },
+    {
+      "sector": "motion_invariants",
+      "target": "angular_velocity",
+      "axis": "x",
+      "rmse": 15.724649335842107,
+      "r2": 0.22857781211313644
+    },
+    {
+      "sector": "motion_invariants",
+      "target": "angular_velocity",
+      "axis": "y",
+      "rmse": 14.859187679555063,
+      "r2": 0.25981222290840167
+    },
+    {
+      "sector": "motion_invariants",
+      "target": "angular_velocity",
+      "axis": "z",
+      "rmse": 14.054903265585054,
+      "r2": 0.35490824042060853
+    },
+    {
+      "sector": "motion_artifacts",
+      "target": "angular_velocity",
+      "axis": "x",
+      "rmse": 1.30155428019987,
+      "r2": 0.9947148811654419
+    },
+    {
+      "sector": "motion_artifacts",
+      "target": "angular_velocity",
+      "axis": "y",
+      "rmse": 1.6139826615133663,
+      "r2": 0.9912672806559178
+    },
+    {
+      "sector": "motion_artifacts",
+      "target": "angular_velocity",
+      "axis": "z",
+      "rmse": 1.5796470801895004,
+      "r2": 0.9918513453803165
+    }
+  ]
+}
