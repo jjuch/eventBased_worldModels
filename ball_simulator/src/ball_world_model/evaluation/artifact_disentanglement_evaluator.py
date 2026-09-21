@@ -6,8 +6,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from ball_world_model.models.rotation import rotation_geodesic_error
-
 def _write_csv(path: Path, rows: list[dict]) -> None:
     if not rows:
         return
@@ -50,26 +48,27 @@ def collect_artifact_batches(module, loader, device, maximum=5000):
         time = batch["context_time"].to(device)
         prediction = module.model(rgb, time)
 
-        motion = prediction.motion
-        nu = motion.forward_sectors.artifacts
-
         keep = min(rgb.shape[0], maximum - used)
         used += keep
 
-        artifacts.append(nu[:keep].mean(1).cpu().numpy())
-        omega.append(batch["context_angular_velocity"][:keep, :-1].mean(1).numpy())
-        if hasattr(motion, "artifact_residual_reconstruction"):
-            residual_mse.append((motion.artifact_residual_reconstruction[:keep] - motion.artifact_residual_target[:keep]).square().mean((1, 2, 3, 4)).cpu().numpy())
+        motion = prediction.motion
 
-        # This is expected to be exactly zero if artifacts are downstream-isolated.
-        if hasattr(module.model, "forward_with_zero_artifacts"):
-            bypass = module.model.forward_with_zero_artifacts(rgb, time)
-            physical_delta.append(torch.linalg.vector_norm(prediction.angular_velocity[:keep] - bypass.angular_velocity[:keep], dim=-1).mean(1).cpu().numpy())
+        artifacts.append(motion.forward_sectors.artifacts[:keep].mean(1).cpu().numpy())
+        omega.append(batch["context_angular_velocity"][:keep, :-1].mean(1).numpy())
+
+        residual_mse.append((
+            motion.artifact_residual_reconstruction_forward[:keep] - motion.artifact_residual_target_forward[:keep]
+        ).square().mean((1, 2, 3, 4)).cpu().numpy())
+        bypass = module.model.forward_with_zero_artifacts(rgb, time)
+        physical_delta.append(torch.linalg.vector_norm(
+            prediction.angular_velocity[:keep] - bypass.angular_velocity[:keep], dim=-1
+        ).mean(1).cpu().numpy())
+
     return {
         "artifacts": np.concatenate(artifacts),
         "omega": np.concatenate(omega),
-        "residual_mse": np.concatenate(residual_mse) if residual_mse else np.array([]),
-        "physical_delta": np.concatenate(physical_delta) if physical_delta else np.array([])
+        "residual_mse": np.concatenate(residual_mse),
+        "physical_delta": np.concatenate(physical_delta),
     }
 
 
@@ -82,20 +81,18 @@ def evaluate_artifact_disentanglement(module, train_loader, test_loader, device,
     rows = _ridge(train["artifacts"], train["omega"], test["artifacts"], test["omega"])
     _write_csv(output / "artifact_omega_probe_csv", rows)
 
-    summary = []
-    if len(test["residual_mse"]):
-        summary.append({
-            "metric": "residual_feature_mse", 
+    summary = [
+        {
+            "metric": "residual_feature_mse",
             "mean": float(test["residual_mse"].mean()),
             "p95": float(np.quantile(test["residual_mse"], 0.95))
-        })
-
-    if len(test["physical_delta"]):
-        summary.append({
+        },
+        {
             "metric": "zero_artifact_omega_delta_radps",
             "mean": float(test["physical_delta"].mean()),
             "p95": float(np.quantile(test["physical_delta"], 0.95))
-        })
+        },
+    ]
     _write_csv(output / "artifact_utility_and_bypass.csv", summary)
     return rows, summary
 

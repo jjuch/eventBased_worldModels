@@ -15,6 +15,7 @@ from ball_world_model.models.rotation import quaternion_xyzw_to_matrix
 from .metrics import apply_linear_probe, effective_rank, fit_linear_probe, regression_metrics
 from .model_loader import denormalised_prediction
 from .structured_so3_evaluator import evaluate_structured_so3_latent
+from .artifact_disentanglement_evaluator import evaluate_artifact_disentanglement
 
 
 def _numpy(value):
@@ -354,5 +355,13 @@ def evaluate_loaded_rotation_observer(
             output,
             train_maximum=settings.maximum_probe_train_windows,
             test_maximum=settings.maximum_test_windows,
+        )
+        evaluate_artifact_disentanglement(
+            module,
+            train_loader,
+            test_loader,
+            device,
+            output,
+            maximum=settings.maximum_probe_train_windows,
         )
     return output.resolve()

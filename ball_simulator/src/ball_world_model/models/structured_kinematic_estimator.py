@@ -2,14 +2,26 @@
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 from torch import nn
 
 from .kinematic_encoder import CoordinateAwareFrameEncoder
 from .latent_motion import RunningDeltaNormaliser, SpatialMotionEncoder
-from .structured_so3 import RichSO3ContextHead, RichSO3MotionHead, world_step, orbit, MotionSector, ContextSectors
+from .structured_so3 import (
+    RichSO3ContextHead, 
+    RichSO3MotionHead, 
+    world_step, orbit, 
+    MotionSector, 
+    ContextSectors,
+)
+
+from .artifact_residual import (
+    ArtifactResidualDecoder,
+    ArtifactResidualEncoder,
+    PhysicalFeatureRatePredictor,
+)
 
 @dataclass(frozen=True)
 class RichMotionDiagnostics:
@@ -28,8 +40,23 @@ class RichMotionDiagnostics:
     predicted_previous_invariants: torch.Tensor
     predicted_next_artifacts: torch.Tensor
     predicted_previous_artifacts: torch.Tensor
+    physical_feature_rate_forward: torch.Tensor
+    physical_feature_rate_backward: torch.Tensor
+    artifact_residual_target_forward: torch.Tensor
+    artifact_residual_target_backward: torch.Tensor
+    artifact_residual_reconstruction_forward: torch.Tensor
+    artifact_residual_reconstruction_backward: torch.Tensor
     linear_refinement_residuals: tuple = ()
     rotational_refinement_residuals: tuple = ()
+
+    @property
+    def artifact_residual_target(self) -> torch.Tensor:
+        return self.artifact_residual_target_forward
+
+    @property
+    def artifact_residual_reconstruction(self) -> torch.Tensor:
+        return self.artifact_residual_reconstruction_forward
+
 
 
 @dataclass(frozen=True)
@@ -55,10 +82,13 @@ class StructuredSO3StateEstimator(nn.Module):
         geometric_channels=24, 
         physical_invariant_dim=16, 
         default_frame_dt=0.01, 
-        delta_momentum=0.01, 
+        delta_momentum=0.01,
+        artifact_mode="physical_residual_adversarial",
+        artifact_residual_hidden_channels=128,
         **_: object) -> None:
         super().__init__()
         self.default_frame_dt = float(default_frame_dt)
+        self.artifact_mode = artifact_mode
         self.frame_encoder = CoordinateAwareFrameEncoder(
             embedding_dim=descriptor_dim, 
             keypoints=keypoints
@@ -67,8 +97,13 @@ class StructuredSO3StateEstimator(nn.Module):
         channels = self.frame_encoder.feature_channels
         self.delta_normaliser = RunningDeltaNormaliser(channels, momentum=delta_momentum)
         self.motion_encoder = SpatialMotionEncoder(channels, motion_dim)
-        self.context_head = RichSO3ContextHead(descriptor_dim, embedding_dim, geometric_channels, physical_invariant_dim)
-        self.motion_head = RichSO3MotionHead(motion_dim, motion_dim, geometric_channels, physical_invariant_dim)
+        self.context_head = RichSO3ContextHead(
+            descriptor_dim, embedding_dim, geometric_channels, physical_invariant_dim
+        )
+        self.motion_head = RichSO3MotionHead(
+            motion_dim, motion_dim, geometric_channels, physical_invariant_dim
+        )
+
         context_layout = self.context_head.layout
         motion_layout = self.motion_head.layout
         self.invariant_transition = self._transition(
@@ -78,6 +113,20 @@ class StructuredSO3StateEstimator(nn.Module):
         self.artifact_transition = self._transition(
             motion_layout.motion_artifact_dim,
             context_layout.context_artifact_dim
+        )
+        self.physical_feature_rate_predictor = PhysicalFeatureRatePredictor(
+            channels, artifact_residual_hidden_channels
+        )
+        self.artifact_residual_encoder = ArtifactResidualEncoder(
+            channels,
+            motion_layout.motion_artifact_dim,
+            artifact_residual_hidden_channels,
+        )
+        self.artifact_residual_decoder = ArtifactResidualDecoder(
+            motion_layout.motion_artifact_dim,
+            channels,
+            spatial_size=16,
+            hidden_channels=artifact_residual_hidden_channels,
         )
 
     @staticmethod
@@ -110,6 +159,34 @@ class StructuredSO3StateEstimator(nn.Module):
             ), dim=-1,
         )
 
+    @staticmethod
+    def _replace_motion_artifacts(sector: MotionSector, artifacts: torch.Tensor) -> MotionSector:
+        packed = torch.cat(
+            (
+                sector.omega,
+                sector.amplitude_rate,
+                sector.carrier_tangent.flatten(-2),
+                sector.physical_invariants,
+                artifacts,
+            ),
+            dim=-1,
+        )
+        return replace(sector, artifacts=artifacts, packed=packed)
+
+    def _residual_artifacts(
+        self,
+        maps: torch.Tensor,
+        rotation_6d: torch.Tensor,
+        omega: torch.Tensor,
+        dt: torch.Tensor,
+        observed_rate: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        physical_rate = self.physical_feature_rate_predictor(maps, rotation_6d, omega, dt)
+        residual_target = observed_rate - physical_rate.detach()
+        artifacts = self.artifact_residual_encoder(residual_target)
+        reconstruction = self.artifact_residual_decoder(artifacts)
+        return artifacts, physical_rate, residual_target, reconstruction
+
     
     def forward(self, context_rgb, context_time=None) -> RichPrediction:
         maps = self.frame_encoder.encode_feature_maps(context_rgb)
@@ -134,6 +211,23 @@ class StructuredSO3StateEstimator(nn.Module):
 
         forward = self.motion_head(forward_features, context.carrier[:, :-1])
         backward = self.motion_head(backward_features, context.carrier[:, 1:])
+
+        if self.artifact_mode == "physical_residual_adverserial":
+            (forward_artifacts, physical_rate_forward, residual_forward, reconstruction_forward) = self._residual_artifacts(
+                maps[:, :-1], context.rotation_6d[:, :-1], forward.omega, dt, normalised_rate,
+            )
+            (backward_artifacts, physical_rate_backward, residual_backward, reconstruction_backward) = self._residual_artifacts(
+                maps[:, 1:], context.rotation_6d[:, 1:], backward.omega, dt, -normalised_rate,
+            )
+            forward = self._replace_motion_artifacts(forward, forward_artifacts)
+            backward = self._replace_motion_artifacts(backward, backward_artifacts)
+        else:
+            physical_rate_forward = torch.zeros_like(normalised_rate)
+            physical_rate_backward = torch.zeros_like(normalised_rate)
+            residual_forward = normalised_rate
+            residual_backward = -normalised_rate
+            reconstruction_forward = torch.zeros_like(normalised_rate)
+            reconstruction_backward = torch.zeros_like(normalised_rate)
 
         next_rotation = world_step(context.rotation[:, :-1], forward.omega, dt)
         previous_rotation = world_step(context.rotation[:, 1:], backward.omega, dt)
@@ -174,21 +268,27 @@ class StructuredSO3StateEstimator(nn.Module):
         )
         
         diagnostics = RichMotionDiagnostics(
-            normalised_forward_difference=normalised_rate, 
-            forward_motion=forward.packed, 
-            backward_motion=backward.packed, 
-            predicted_next_embedding=next_packed, 
-            predicted_previous_embedding=previous_packed, 
-            forward_angular_velocity=forward.omega, 
-            backward_angular_velocity=backward.omega, 
-            forward_sectors=forward, 
-            backward_sectors=backward, 
-            predicted_next_rotation=next_rotation, 
+            normalised_forward_difference=normalised_rate,
+            forward_motion=forward.packed,
+            backward_motion=backward.packed,
+            predicted_next_embedding=next_packed,
+            predicted_previous_embedding=previous_packed,
+            forward_angular_velocity=forward.omega,
+            backward_angular_velocity=backward.omega,
+            forward_sectors=forward,
+            backward_sectors=backward,
+            predicted_next_rotation=next_rotation,
             predicted_previous_rotation=previous_rotation,
             predicted_next_invariants=next_invariants,
             predicted_previous_invariants=previous_invariants,
             predicted_next_artifacts=next_artifacts,
             predicted_previous_artifacts=previous_artifacts,
+            physical_feature_rate_forward=physical_rate_forward,
+            physical_feature_rate_backward=physical_rate_backward,
+            artifact_residual_target_forward=residual_forward,
+            artifact_residual_target_backward=residual_backward,
+            artifact_residual_reconstruction_forward=reconstruction_forward,
+            artifact_residual_reconstruction_backward=reconstruction_backward,
         )
         return RichPrediction(
             position=None, 
@@ -200,4 +300,20 @@ class StructuredSO3StateEstimator(nn.Module):
             feature_maps=maps, 
             motion=diagnostics, 
             context_sectors=context
+        )
+
+    def forward_with_zero_artifacts(self, context_rgb, context_time=None) -> RichPrediction:
+        """Diagnostic route. Physical outputs are upstream of artifact replacement."""
+        prediction = self.forward(context_rgb, context_time)
+        motion = prediction.motion
+
+        forward = self._replace_motion_artifacts(
+            motion.forward_sectors, torch.zeros_like(motion.forward_sectors.artifacts)
+        )
+        backward = self._replace_motion_artifacts(
+            motion.backward_sectors, torch.zeros_like(motion.backward_sectors.artifacts)
+        )
+        return replace(
+            prediction,
+            motion=replace(motion, forward_sectors=forward, backward_sectors=backward),
         )

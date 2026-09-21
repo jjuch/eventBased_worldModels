@@ -9,7 +9,9 @@ import torch.nn.functional as F
 from ball_world_model.models.rotation import quaternion_xyzw_to_matrix, rotation_geodesic_error
 from ball_world_model.models.structured_kinematic_estimator import StructuredSO3StateEstimator
 from ball_world_model.models.structured_so3 import RichPhysicalStateTeacher
+from ball_world_model.models.artifact_residual import PhysicsAdversary, adversary_strength
 from .kinematic_module import KinematicStatistics
+from .artifact_disentanglement import artifact_disentanglement_loss
 
 
 class StructuredSO3ObservabilityModule(L.LightningModule):
@@ -36,7 +38,17 @@ class StructuredSO3ObservabilityModule(L.LightningModule):
         variance_weight: float = 0.01, 
         geometric_channels: int = 24,
         physical_invariant_dim: int = 16,
-        latent_architecture: str = "structured_so3_artifacts", 
+        latent_architecture: str = "structured_so3_artifacts",
+        artifact_mode: str = "physics_residual_adversarial",
+        physical_feature_rate_weight: float = 0.01,
+        artifact_residual_weight: float = 0.01,
+        artifact_cross_covariance_weight: float = 0.001,
+        artifact_adversary_omega_weight: float = 0.01,
+        artifact_adversary_rotation_weight: float = 0.005,
+        artifact_adversary_max_strength: float = 0.02,
+        artifact_adversary_warmup_epochs: int = 10,
+        artifact_residual_hidden_channels: int = 128,
+        artifact_adversary_hidden_dim: int = 128,
         **model: object
     ) -> None:
         super().__init__()
@@ -47,7 +59,13 @@ class StructuredSO3ObservabilityModule(L.LightningModule):
         self.model = StructuredSO3StateEstimator(
             geometric_channels=geometric_channels,
             physical_invariant_dim=physical_invariant_dim,
+            artifact_mode=artifact_mode,
+            artifact_residual_hidden_channels=artifact_residual_hidden_channels,
             **model
+        )
+        artifact_dim = self.model.motion_head.layout.motion_artifact_dim
+        self.artifact_adversary = PhysicsAdversary(
+            artifact_dim, artifact_adversary_hidden_dim
         )
         self.teacher = RichPhysicalStateTeacher(geometric_channels)
         for name, value in asdict(statistics).items():
@@ -110,6 +128,61 @@ class StructuredSO3ObservabilityModule(L.LightningModule):
 
         invariant_variance = self._variance_floor(context.physical_invariants) + self._variance_floor(motion.forward_sectors.physical_invariants)
 
+        forward_physical_feature_rate_loss = F.smooth_l1_loss(
+            motion.physical_feature_rate_forward,
+            motion.normalised_forward_difference.detach(),
+        )
+        backward_physical_feature_rate_loss = F.smooth_l1_loss(
+            motion.physical_feature_rate_backward,
+            -motion.normalised_forward_difference.detach(),
+        )
+        physical_feature_rate_loss = 0.5 * (forward_physical_feature_rate_loss + backward_physical_feature_rate_loss)
+
+        strength = adversary_strength(
+            int(self.current_epoch),
+            int(self.hparams.artifact_adversary_warmup_epochs),
+            float(self.hparams.artifact_adversary_max_strength),
+        )
+        adversary_omega, adversary_relative_rotation = self.artifact_adversary(
+            motion.forward_sectors.artifacts, strength
+        )
+
+        target_relative_rotation = (
+            target_rotation[:, 1:] @ target_rotation[:, :-1].transpose(-1, -2)
+        )
+        target_omega_normalised = (
+            teacher_omega - self.angular_velocity_mean
+        ) / self.angular_velocity_std
+
+        physical_motion = torch.cat(
+            (
+                omega_error_normalised + target_omega_normalised,
+                motion.forward_sectors.amplitude_rate,
+                motion.forward_sectors.carrier_tangent.flatten(-2) / self.angular_velocity_std.norm().clamp_min(1.0),
+                motion.forward_sectors.physical_invariants,
+            ),
+            dim=-1,
+        )
+
+        artifact_losses = artifact_disentanglement_loss(
+            artifact=motion.forward_sectors.artifacts,
+            reconstructed_residual=motion.artifact_residual_reconstruction_forward,
+            residual_target=motion.artifact_residual_target_forward,
+            adversary_omega=adversary_omega,
+            adversary_relative_rotation_6d=adversary_relative_rotation,
+            target_omega_normalised=target_omega_normalised,
+            target_relative_rotation=target_relative_rotation,
+            physical_motion=physical_motion,
+        )
+        backward_residual_loss = F.smooth_l1_loss(
+            motion.artifact_residual_reconstruction_backward,
+            motion.artifact_residual_target_backward.detach(),
+        )
+        residual_reconstruction = 0.5 * (
+            artifact_losses["artifact_residual_reconstruction_loss"]
+            + backward_residual_loss
+        )
+
         total = (
             self.hparams.orientation_weight * orientation_loss
             + self.hparams.omega_weight * omega_loss
@@ -122,6 +195,15 @@ class StructuredSO3ObservabilityModule(L.LightningModule):
             + self.hparams.artifact_weight * artifact_prediction
             + self.hparams.variance_weight * artifact_variance
             + self.hparams.invariant_variance_weight * invariant_variance
+            + self.hparams.physical_feature_rate_weight * physical_feature_rate_loss
+            + self.hparams.artifact_residual_weight * residual_reconstruction
+            + self.hparams.artifact_cross_covariance_weight
+            * artifact_losses["artifact_cross_covariance_loss"]
+            + self.hparams.artifact_adversary_omega_weight
+            * artifact_losses["artifact_adversary_omega_loss"]
+            + self.hparams.artifact_adversary_rotation_weight
+            * artifact_losses["artifact_adversary_rotation_loss"]
+
         )
 
         metrics = {
@@ -138,8 +220,15 @@ class StructuredSO3ObservabilityModule(L.LightningModule):
             "amplitude_loss": amplitude_loss,
             "artifact_variance_loss": artifact_variance,
             "invariant_variance_loss": invariant_variance,
+            "physical_feature_rate_loss": physical_feature_rate_loss,
+            "artifact_residual_reconstruction_loss": residual_reconstruction,
+            "artifact_cross_covariance_loss": artifact_losses["artifact_cross_covariance_loss"],
+            "artifact_adversary_omega_loss": artifact_losses["artifact_adversary_omega_loss"],
+            "artifact_adversary_rotation_loss": artifact_losses["artifact_adversary_rotation_loss"],
+            "artifact_adversary_strength": torch.as_tensor(strength, device=self.device),
             "context_invariant_std": context.physical_invariants.std(unbiased=False),
             "motion_invariant_std": motion.forward_sectors.physical_invariants.std(unbiased=False),
+            "motion_artifact_std": motion.forward_sectors.artifacts.std(unbiased=False),
         }
 
         return total, metrics
