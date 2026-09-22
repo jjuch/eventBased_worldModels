@@ -1,0 +1,30 @@
+\begin{tikzpicture}[node distance=7mm and 9mm,
+base/.style={draw=blue!55!black,fill=blue!5,rounded corners,align=center,minimum height=10mm},
+geo/.style={draw=green!45!black,fill=green!7,rounded corners,align=center,minimum height=10mm},
+art/.style={draw=orange!70!black,fill=orange!8,rounded corners,align=center,minimum height=10mm},
+adv/.style={draw=red!60!black,fill=red!5,rounded corners,align=center,minimum height=10mm},
+arr/.style={-{Latex[length=2.4mm]},thick},rev/.style={-{Latex[length=2.4mm]},thick,red!70!black,dashed}]
+\node[base] (rgb) {$I_{1:T}$\\RGB context};
+\node[base,right=of rgb] (cnn) {coordinate-aware CNN\\$F_t\in\mathbb R^{128\times16\times16}$};
+\node[base,right=of cnn] (desc) {soft-keypoint descriptor\\$d_t\in\mathbb R^{256}$};
+\node[geo,above right=5mm and 8mm of desc] (G) {$G_t\in SO(3)$\\6D chart};
+\node[geo,right=of G] (carrier) {$K=24$ carrier\\$u_{t,k}=\alpha_{t,k}G_tb_k$};
+\node[base,right=of carrier] (scal) {scalar context\\$c_t$};
+\node[art,right=of scal] (ca) {context artifacts\\$a_t$};
+\node[base,below=18mm of cnn] (rate) {observed feature rate\\$\dot F^{obs}_t$};
+\node[base,right=of rate] (me) {shared pairwise\\motion encoder};
+\node[geo,right=of me] (xi) {$\xi_t\in\mathfrak{so}(3)$};
+\node[geo,right=of xi] (tangent) {$\dot u_{t,k}=\xi_t\times u_{t,k}$};
+\node[base,right=of tangent] (ms) {scalar motion\\$q_t$};
+\node[geo,below=15mm of xi] (phys) {physics-conditioned predictor\\$\widehat{\dot F}^{phys}_t=D_p(F_t,G_t,\xi_t,\Delta t)$};
+\node[art,right=of phys] (res) {$r_t=\dot F^{obs}_t-\operatorname{sg}(\widehat{\dot F}^{phys}_t)$};
+\node[art,right=of res] (nu) {residual encoder\\$\nu_t=E_\nu(r_t)$};
+\node[art,below=14mm of nu] (dec) {residual decoder\\$\hat r_t=D_\nu(\nu_t)$};
+\node[adv,left=of dec] (omegaadv) {$A_\omega(\nu_t)\to\omega_t$\\gradient reversal};
+\node[adv,left=of omegaadv] (rotadv) {$A_{\Delta R}(\nu_t)\to\Delta R_t$\\gradient reversal};
+\node[geo,below=16mm of carrier] (step) {$\hat G_{t+1}=\exp(\Delta t[\xi_t]_\times)G_t$};
+\draw[arr](rgb)--(cnn);\draw[arr](cnn)--(desc);\draw[arr](desc)--(G);\draw[arr](desc)--(carrier);\draw[arr](desc)--(scal);\draw[arr](desc)--(ca);
+\draw[arr](cnn)--(rate);\draw[arr](rate)--(me);\draw[arr](me)--(xi);\draw[arr](me)--(tangent);\draw[arr](me)--(ms);\draw[arr](G)--(step);\draw[arr](xi)--(step);
+\draw[arr](rate)--(res);\draw[arr](xi)--(phys);\draw[arr](G)--(phys);\draw[arr](cnn)|-(phys);\draw[arr](phys)--(res);\draw[arr](res)--(nu);\draw[arr](nu)--(dec);
+\draw[rev](nu)--(omegaadv);\draw[rev](nu)-|(rotadv);
+\end{tikzpicture}

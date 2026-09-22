@@ -1,12 +1,26 @@
 \documentclass[11pt,a4paper]{article}
 \usepackage[margin=24mm]{geometry}
-\usepackage[T1]{fontenc}\usepackage[utf8]{inputenc}\usepackage{lmodern}\usepackage{microtype}
-\usepackage{amsmath,amssymb,bm}\usepackage{booktabs,tabularx,longtable,array}
-\usepackage{graphicx}\usepackage[dvipsnames]{xcolor}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs,tabularx,longtable,array}
+\usepackage{graphicx}
+\usepackage{rotating}
+\usepackage[dvipsnames]{xcolor}
 \usepackage{hyperref}
-\usepackage{fancyhdr}\usepackage[numbers,sort&compress]{natbib}
-\definecolor{reportblue}{HTML}{174A7E}\definecolor{reportgreen}{HTML}{2E7D32}\definecolor{reportorange}{HTML}{C76B00}\definecolor{reportred}{HTML}{A52521}\definecolor{reportgray}{HTML}{F3F5F7}
-\hypersetup{colorlinks=true,linkcolor=reportblue,citecolor=reportblue,urlcolor=reportblue,pdftitle={Structured SO(3) Latents with Physics-Residual Artifacts}}
+\usepackage{fancyhdr}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,fit}
+\usepackage[numbers,sort&compress]{natbib}
+\definecolor{reportblue}{HTML}{174A7E}
+\definecolor{reportgreen}{HTML}{2E7D32}
+\definecolor{reportorange}{HTML}{C76B00}
+\definecolor{reportred}{HTML}{A52521}
+\definecolor{reportgray}{HTML}{F3F5F7}
+
+\hypersetup{colorlinks=true,linkcolor=reportblue,citecolor=reportblue,urlcolor=reportblue,pdftitle={Structured SO(3) Latents with Physics-Residual Artifacts},pdfauthor={Jasper Juchem}}
 \setlength{\parindent}{0pt}\setlength{\parskip}{.55em}
 \setlength{\headheight}{14pt}
 \pagestyle{fancy}\fancyhf{}\lhead{Structured $SO(3)$ Latents and Residual Artifacts}\rhead{21 September 2026}\cfoot{\thepage}
@@ -142,7 +156,7 @@ If amplitudes vary, the complete derivative also contains $\dot\alpha_{t,k}G_tb_
 A 16-dimensional scalar motion sector $q_t$ can describe coordinate-free temporal information. A 141-dimensional artifact sector $\nu_t$ is intended to represent visual change that remains after rigid rotation has been explained. The earlier model instead produced $\nu_t$ as a generic parallel head from the shared motion representation. That design allowed angular velocity to be copied almost perfectly into artifacts.
 
 \section{Physics-residual artifact architecture}
-\begin{figure}[p]\centering\includegraphics[width=\textwidth]{figures/architecture.pdf}\caption{Complete structured observer with physics-residual artifact training. The artifact branch receives a stopped-gradient residual rather than the generic motion representation. Dashed red connections are adversarial through gradient reversal.}\label{fig:architecture}\end{figure}\clearpage
+\begin{sidewaysfigure}[p]\centering\input{figures/architecture.tex}\caption{Complete structured observer with physics-residual artifact training. The artifact branch receives a stopped-gradient residual rather than the generic motion representation. Dashed red connections are adversarial through gradient reversal.}\label{fig:architecture}\end{sidewaysfigure}\clearpage
 
 \subsection{Physics-conditioned feature-rate predictor}
 The model predicts the component of observed feature change that should be explained by the structured physical state:
@@ -220,7 +234,7 @@ The artifact objective is deliberately two-sided:
 \end{equation}
 The first two terms retain unexplained observation information. The next three discourage rigid-body information. The variance term discourages collapse. The adversarial coefficient is warmed from zero so that the structured physical branch becomes useful before aggressive information removal begins.
 
-\begin{figure}[htbp]\centering\includegraphics[width=.85\textwidth]{figures/objective.pdf}\caption{Competing requirements for the artifact latent. It must be useful for residual observation prediction while uninformative about rigid motion.}\end{figure}
+\begin{figure}[htbp]\centering\input{figures/objective.tex}\caption{Competing requirements for the artifact latent. It must be useful for residual observation prediction while uninformative about rigid motion.}\end{figure}
 
 \section{Evaluation protocol}
 The current and reference models are evaluated on the same reported test size: 1,050 windows, 10,500 frame states, and 9,450 adjacent intervals. The reference is the 18 September structured model without physics-residual artifact treatment. The current result is the 21 September model with residual input, adversarial removal, and cross-covariance regularisation.

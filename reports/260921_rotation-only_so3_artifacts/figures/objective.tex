@@ -1,0 +1,11 @@
+\begin{tikzpicture}[node distance=9mm and 12mm,
+box/.style={draw,rounded corners,align=center,minimum height=10mm,minimum width=34mm},
+positive/.style={box,draw=green!50!black,fill=green!7},negative/.style={box,draw=red!60!black,fill=red!5},neutral/.style={box,draw=blue!55!black,fill=blue!5},
+arr/.style={-{Latex[length=2.4mm]},thick}]
+\node[neutral] (nu) {artifact latent $\nu_t$};
+\node[positive,above right=10mm and 20mm of nu] (recon) {retain observation residual\\$D_\nu(\nu_t)\approx r_t$};
+\node[negative,right=20mm of nu] (adv) {remove rigid motion\\$A_\omega,A_{\Delta R}$};
+\node[negative,below right=10mm and 20mm of nu] (xcov) {decorrelate sectors\\$\|\operatorname{Cov}(m^{phys},\nu)\|_F^2$};
+\node[positive,left=20mm of nu] (var) {avoid collapse\\variance floor};
+\draw[arr](nu)--(recon);\draw[arr](nu)--(adv);\draw[arr](nu)--(xcov);\draw[arr](nu)--(var);
+\end{tikzpicture}
