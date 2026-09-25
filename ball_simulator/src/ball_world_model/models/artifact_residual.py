@@ -35,12 +35,11 @@ def cross_covariance_loss(first: torch.Tensor, second: torch.Tensor) -> torch.Te
 
 
 class PhysicalFeatureRatePredictor(nn.Module):
-    """Predict feature-map rate explained by G and xi, without artifact input."""
-    def __init__(self, channels: int, hidden_channels: int = 128) -> None:
+    """Predict the feature rate explained by a structured physical condition."""
+    def __init__(self, channels: int, hidden_channels: int = 128, conditioning_dim: int = 10) -> None:
         super().__init__()
-        # F_t plus broadcast 6D rotation, omega and dt.
         self.network = nn.Sequential(
-            nn.Conv2d(channels + 10, hidden_channels, 3, padding=1, bias=False),
+            nn.Conv2d(channels + conditioning_dim, hidden_channels, 3, padding=1, bias=False),
             nn.GroupNorm(8, hidden_channels),
             nn.SiLU(),
             nn.Conv2d(hidden_channels, hidden_channels, 3, padding=1, bias=False),
@@ -51,11 +50,10 @@ class PhysicalFeatureRatePredictor(nn.Module):
         nn.init.zeros_(self.network[-1].weight)
         nn.init.zeros_(self.network[-1].bias)
 
-    def forward(self, feature: torch.Tensor, rotation_6d: torch.Tensor, omega: torch.Tensor, dt: torch.Tensor) -> torch.Tensor:
+    def forward(self, feature: torch.Tensor, condition: torch.Tensor) -> torch.Tensor:
         b, t, c, h, w = feature.shape
-        conditioning = torch.cat((rotation_6d, omega, dt), dim=-1)
-        conditioning = conditioning[..., None, None].expand(-1, -1, -1, h, w)
-        value = torch.cat((feature, conditioning), dim=2).flatten(0, 1)
+        condition = condition[..., None, None].expand(-1, -1, -1, h, w)
+        value = torch.cat((feature, condition), dim=2).flatten(0, 1)
         return self.network(value).reshape(b, t, c, h, w)
 
 

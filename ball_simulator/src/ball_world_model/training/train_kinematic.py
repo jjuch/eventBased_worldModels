@@ -14,7 +14,7 @@ from .kinematic_module import (
     KinematicObservabilityModule,
     compute_kinematic_statistics,
 )
-from .structured_so3_module import StructuredSO3ObservabilityModule
+from .structured_se3_module import StructuredSE3ObservabilityModule
 
 
 def train_kinematic(config_path: str | Path) -> Path:
@@ -36,15 +36,11 @@ def train_kinematic(config_path: str | Path) -> Path:
     statistics = compute_kinematic_statistics(statistics_loader)
     model_config = configuration.get("model", {})
     module_class = (
-        StructuredSO3ObservabilityModule
-        if model_config.get("latent_architecture") == "structured_so3_artifacts"
+        StructuredSE3ObservabilityModule
+        if model_config.get("latent_architecture") == "structured_sO3_artifacts"
         else KinematicObservabilityModule
     )
-    module_class_name = (
-        "StructuredSO3ObservabilityModule"
-        if model_config.get("latent_architecture") == "structured_so3_artifacts"
-        else "KinematicObservabilityModule"
-    )
+    module_class_name = module_class.__name__
     print(f"[train_kinematic] The selected module class for training is: {module_class_name}")
     module = module_class(
         statistics,

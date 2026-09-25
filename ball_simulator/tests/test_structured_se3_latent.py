@@ -1,16 +1,20 @@
 import torch
-import pytest
+
+from dataclasses import replace
 
 from ball_world_model.models.rotation import rotation_geodesic_error, so3_exp
-from ball_world_model.models.structured_kinematic_estimator import StructuredSO3StateEstimator
-from ball_world_model.models.structured_so3 import (
-    RichPhysicalStateTeacher,
+from ball_world_model.models.structured_se3_estimator import StructuredSE3StateEstimator
+from ball_world_model.models.structured_se3 import (
+    SE3PhysicalTeacher,
     PHYSICAL_MARKERS,
-    tangent,
+    tangent_rotation,
     orbit,
-    world_step,
+    rotation_step,
     canonical_templates,
-    RichLayout,
+    SE3Layout,
+    SE3ContextHead,
+    SE3MotionHead,
+    SectorMask,
 )
 
 
@@ -25,10 +29,10 @@ def test_orbits_lift_is_equivariant_under_group_composition():
     torch.testing.assert_close(direct, composed, atol=1e-6, rtol=1e-6) 
 
 
-def test_rich_layout():
-    x = RichLayout(256, 24, 16)
-    assert x.context_structured_dim == 118 and x.context_artifact_dim == 138
-    assert x.motion_structured_dim == 115 and x.motion_artifact_dim == 141
+def test_se3_layout():
+    x = SE3Layout(256, 24, 16)
+    assert x.context_structured_dim == 217 and x.context_artifact_dim == 39
+    assert x.motion_structured_dim == 214 and x.motion_artifact_dim == 42
 
 
 def test_tangent_matches_finite_difference():
@@ -36,41 +40,46 @@ def test_tangent_matches_finite_difference():
     rotation = so3_exp(torch.randn(2,3)*.2)
     omega = torch.randn(2, 3)
     U = orbit(rotation, C)
-    analytic = tangent(U, omega)
+    analytic = tangent_rotation(U, omega)
     dt = torch.full((2, 1), 1e-4)
-    next_orbit = orbit(world_step(rotation, omega, dt), C)
+    next_orbit = orbit(rotation_step(rotation, omega, dt), C)
     numerical = (next_orbit - U) / dt.unsqueeze(-1)
     torch.testing.assert_close(analytic, numerical, atol=3e-3, rtol=8e-4)
 
 
 def test_teacher_is_rich_but_geometry_preserving():
-    teacher = RichPhysicalStateTeacher()
+    teacher = SE3PhysicalTeacher()
+    position = torch.randn(5, 3)
     rotation = so3_exp(torch.randn(5, 3))
+    velocity = torch.randn(5, 3)
     omega = torch.randn(5, 3)
-    group, orb = teacher.context(rotation)
-    algebra, tang = teacher.motion(rotation, omega)
-    assert group.shape == (5, 24)
-    assert orb.shape == (5, 24, 3)
-    assert algebra.shape == (5, 3)
-    assert tang.shape == (5, 24, 3)
+    mask = SectorMask(translation=True, rotation=True)
+    at, ar, ct, cr = teacher.context(position, rotation, mask)
+    crt, crr = teacher.motion(position, rotation, velocity, omega, mask)
+    assert at.shape == (5, 24)
+    assert ar.shape == (5, 24)
+    assert ct.shape == (5, 24, 3)
+    assert cr.shape == (5, 24, 3)
+    assert crt.shape == (5, 24, 3)
+    assert crr.shape == (5, 24, 3)
 
 
 def test_structured_model_shapes_and_valid_group():
-    model = StructuredSO3StateEstimator(
+    model = StructuredSE3StateEstimator(
         embedding_dim=64,
-        motion_dim=48,
+        motion_dim=64,
         descriptor_dim=64,
         keypoints=4,
-        geometric_channels=8,
+        geometric_channels=4,
         physical_invariant_dim=8,
     )
     images = torch.randn(2, 5, 3, 64, 64)
     time = torch.arange(5, dtype=torch.float32).unsqueeze(0).expand(2, -1) * 0.01
     prediction = model(images, time)
     assert prediction.frame_latent.shape == (2, 5, 64)
-    assert prediction.motion.forward_motion.shape == (2, 4, 48)
-    assert prediction.context_sectors.artifacts.shape[-1] == 18
-    assert prediction.motion.forward_sectors.artifacts.shape[-1] == 5
+    assert prediction.motion.forward_motion.shape == (2, 4, 64)
+    assert prediction.context_sectors.artifacts.shape[-1] == 15
+    assert prediction.motion.forward_sectors.artifacts.shape[-1] == 18
     assert prediction.motion.predicted_next_invariants.shape == (2, 4, 8)
     assert prediction.motion.predicted_previous_invariants.shape == (2, 4, 8)
     assert prediction.motion.predicted_next_artifacts.shape == (2, 4, prediction.context_sectors.artifacts.shape[-1])
@@ -111,3 +120,37 @@ def test_structured_model_shapes_and_valid_group():
         parameter.grad is not None and torch.isfinite(parameter.grad).all()
         for parameter in model.invariant_transition.parameters()
     )
+
+
+def sliced(context):
+    return replace(context, 
+        position=context.position[:, :-1], 
+        rotation_6d=context.rotation_6d[:, :-1], 
+        rotation=context.rotation[:, :-1],
+        translation_amplitudes=context.translation_amplitudes[:, :-1],
+        rotation_amplitudes=context.rotation_amplitudes[:, :-1],
+        translation_carrier=context.translation_carrier[:, :-1],
+        rotation_carrier=context.rotation_carrier[:, :-1],
+        physical_scalars=context.physical_scalars[:, :-1], 
+        artifacts=context.artifacts[:, :-1], 
+        packed=context.packed[:, :-1]
+    )
+
+def test_fixed_layout():
+    layout = SE3Layout()
+    assert layout.context_artifact_dim == 39
+    assert layout.motion_artifact_dim == 42
+
+
+def test_every_task_packs_to_256_and_masks_inactives_sectors():
+    for task in ("translation", "rotation", "combined"):
+        context = SE3ContextHead(32, 256, 24, 16, task)(torch.randn(2, 5, 32))
+        motion = SE3MotionHead(32, 256, 24, 16, task)(torch.randn(2, 4, 32), sliced(context))
+        assert context.packed.shape == (2, 5, 256)
+        assert motion.packed.shape == (2, 4, 256)
+
+        if task == "translation":
+            assert torch.count_nonzero(context.rotation_carrier) == 0 and torch.count_nonzero(motion.angular_velocity) == 0
+
+        if task == "rotation":
+            assert torch.count_nonzero(context.translation_carrier) == 0 and torch.count_nonzero(motion.linear_velocity) == 0

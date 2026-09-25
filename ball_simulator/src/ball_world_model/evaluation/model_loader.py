@@ -7,7 +7,7 @@ from ball_world_model.training.kinematic_module import (
     KinematicObservabilityModule,
     KinematicStatistics,
 )
-from ball_world_model.training.structured_so3_module import StructuredSO3ObservabilityModule
+from ball_world_model.training.structured_se3_module import StructuredSE3ObservabilityModule
 
 _STATISTIC_NAMES = (
     "position_mean",
@@ -60,15 +60,11 @@ def load_kinematic_module(
     hyperparameters = dict(checkpoint.get("hyper_parameters", {}))
     arguments = {key: value for key, value in hyperparameters.items() if key in _ALLOWED_HYPERPARAMETERS}
     module_class = (
-        StructuredSO3ObservabilityModule
+        StructuredSE3ObservabilityModule
         if arguments.get("latent_architecture") == "structured_so3_artifacts"
         else KinematicObservabilityModule
     )
-    module_class_name = (
-        "StructuredSO3ObservabilityModule"
-        if arguments.get("latent_architecture") == "structured_so3_artifacts"
-        else "KinematicObservabilityModule"
-    )
+    module_class_name = module_class.__name__
     print(f"[load_kinematic_module] The selected module class for training is: {module_class_name}")
     module = module_class(statistics, **arguments)
     module.load_state_dict(state_dict, strict=True)
@@ -91,9 +87,9 @@ def denormalised_prediction(module, prediction) -> dict[str, torch.Tensor]:
         )
     if prediction.angular_velocity is not None:
         if getattr(module, "outputs_physical_units", False):
-            print("[denormalise_prediction] The module does not denormalise the angular angular velocity.")
             result["angular_velocity"] = prediction.angular_velocity
         else:
+            print("[denormalise_prediction] The module does not denormalise the angular angular velocity.")
             result["angular_velocity"] = module._denormalise(
                 prediction.angular_velocity,
                 module.angular_velocity_mean,

@@ -2,12 +2,16 @@
 data_config: generated-at-runtime.yaml
 model:
   task: combined
+  latent_architecture: structured_se3_artifacts
+  geometric_channels: 24
+  physical_invariant_dim: 16
+  descriptor_dim: 256
   embedding_dim: 256
   keypoints: 8
   motion_dim: 256
   decoder_hidden_dim: 256
   refinement_hidden_dim: 128
-  refinement_iterations: 1
+  refinement_iterations: 0
   delta_momentum: 0.01
   default_frame_dt: 0.01
   dropout: 0.0
@@ -22,6 +26,18 @@ model:
   rotation_weight: 1.0
   angular_velocity_weight: 1.0
   world_angular_velocity: true
+  orientation_weight: 1.0
+  omega_weight: 1.0
+  carrier_weight: 0.25
+  tangent_weight: 0.05
+  group_weight: 0.1
+  artifact_weight: 0.01
+  amplitude_weight: 0.01
+  invariant_prediction_weight: 0.01
+  invariant_variance_weight: 0.005
+  physical_feature_rate_weight: 0.01
+  artifact_residual_weight: 0.01
+  artifact_cross_covariance_weight: 0.001
 training:
   output_directory: generated-at-runtime
   epochs: 100

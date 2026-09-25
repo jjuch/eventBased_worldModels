@@ -1,5 +1,5 @@
 import numpy as np
-from ball_world_model.evaluation.structured_so3_evaluator import _effective_rank, _regression
+from ball_world_model.evaluation.structured_se3_evaluator import _effective_rank, _regression
 
 def test_effective_rank():
     rng = np.random.default_rng(1)

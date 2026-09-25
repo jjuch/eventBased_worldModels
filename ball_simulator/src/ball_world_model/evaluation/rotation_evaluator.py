@@ -14,7 +14,7 @@ import torch
 from ball_world_model.models.rotation import quaternion_xyzw_to_matrix
 from .metrics import apply_linear_probe, effective_rank, fit_linear_probe, regression_metrics
 from .model_loader import denormalised_prediction
-from .structured_so3_evaluator import evaluate_structured_so3_latent
+from .structured_se3_evaluator import evaluate_structured_se3
 from .artifact_disentanglement_evaluator import evaluate_artifact_disentanglement
 
 
@@ -347,7 +347,7 @@ def evaluate_loaded_rotation_observer(
 
     # test SO3 latent if available
     if hasattr(module.model, "context_head"):
-        evaluate_structured_so3_latent(
+        evaluate_structured_se3(
             module,
             train_loader,
             test_loader,

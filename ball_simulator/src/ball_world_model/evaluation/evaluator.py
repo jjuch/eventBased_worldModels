@@ -23,6 +23,7 @@ from .metrics import (
 )
 from .model_loader import denormalised_prediction, load_kinematic_module
 from .rotation_evaluator import evaluate_loaded_rotation_observer
+from .structured_se3_evaluator import evaluate_structured_se3
 from .plots import component_scatter, error_vs_speed, probe_plot, trajectory_plot
 
 
@@ -252,7 +253,7 @@ def extract_representations(module, loader, device, maximum_windows: int):
         if normalised_difference is None:
             raise AttributeError(
                 "MotionDiagnostics exposes neither normalised_forward_difference "
-                "nor normalized_forward_difference."
+                "nor normalised_forward_difference."
             )
         features["spatial_feature_rate_mean"].append(
             _numpy(normalised_difference.mean(dim=(1, 3, 4)))
@@ -328,7 +329,7 @@ def evaluate_kinematic_observer(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     module = load_kinematic_module(checkpoint_path, device=device)
-    if module.hparams.task == "rotation":
+    if module.hparams.task == "rotation": # TODO: should this be extended to mask == 'rotation', because 'combined' should also trigger this.
         return evaluate_loaded_rotation_observer(
             module=module,
             train_loader=train_loader,
@@ -376,5 +377,9 @@ def evaluate_kinematic_observer(
         "probes": probes,
         "representation_statistics": representation_statistics,
     }
+    if getattr(module.hparams, "latent_architecture", None) == "structured_se3_artifacts":
+        report["structured_se3"] = evaluate_structured_se3(
+            module, test_loader, device, output, settings.maximum_test_windows
+        )
     (output / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return output.resolve()
