@@ -83,6 +83,8 @@ def test_structured_model_shapes_and_valid_group():
     assert prediction.motion.predicted_next_invariants.shape == (2, 4, 8)
     assert prediction.motion.predicted_previous_invariants.shape == (2, 4, 8)
     assert prediction.motion.predicted_next_artifacts.shape == (2, 4, prediction.context_sectors.artifacts.shape[-1])
+    assert prediction.motion.predicted_next_embedding.shape == (2, 4, 64)
+    assert prediction.motion.predicted_previous_embedding.shape == (2, 4, 64)
 
     identity = torch.eye(3).expand_as(prediction.rotation_matrix)
     torch.testing.assert_close(

@@ -37,7 +37,7 @@ def train_kinematic(config_path: str | Path) -> Path:
     model_config = configuration.get("model", {})
     module_class = (
         StructuredSE3ObservabilityModule
-        if model_config.get("latent_architecture") == "structured_sO3_artifacts"
+        if model_config.get("latent_architecture") == "structured_se3_artifacts"
         else KinematicObservabilityModule
     )
     module_class_name = module_class.__name__

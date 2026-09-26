@@ -106,7 +106,7 @@ class StructuredSE3StateEstimator(nn.Module):
         physical_invariant_dim=16, 
         default_frame_dt=0.01, 
         delta_momentum=0.01,
-        artifact_mode="physical_residual_adversarial",
+        artifact_mode="physics_residual_adversarial",
         artifact_residual_hidden_channels=128,
         **_: object) -> None:
         super().__init__()
@@ -134,6 +134,7 @@ class StructuredSE3StateEstimator(nn.Module):
             physical_invariant_dim,
             physical_invariant_dim
         )
+
         self.artifact_transition = self._transition(
             motion_layout.motion_artifact_dim,
             context_layout.context_artifact_dim
@@ -152,6 +153,24 @@ class StructuredSE3StateEstimator(nn.Module):
             spatial_size=16,
             hidden_channels=artifact_residual_hidden_channels,
         )
+
+    @property
+    def artifact_mode(self) -> str:
+        return self._artifact_mode
+
+    @artifact_mode.setter
+    def artifact_mode(self, mode: str):
+        valid_artifact_modes = {
+            "physics_residual_adversarial",
+            "direct",
+        }
+        if mode not in valid_artifact_modes:
+            raise ValueError(
+                f"Unknown artifact mode {mode!r}. "
+                f"Expected one of {sorted(valid_artifact_modes)}."
+            )
+        self._artifact_mode = mode
+
 
     @staticmethod
     def _transition(input_dim: int, output_dim: int) -> nn.Module:
@@ -254,7 +273,7 @@ class StructuredSE3StateEstimator(nn.Module):
         forward = self.motion_head(forward_features, context_forward)
         backward = self.motion_head(backward_features, context_backward)
 
-        if self.artifact_mode == "physical_residual_adverserial":
+        if self.artifact_mode == "physics_residual_adversarial":
             (forward_artifacts, physical_rate_forward, residual_forward, reconstruction_forward) = self._residual_artifacts(
                 maps[:, :-1], context_forward, forward, dt, normalised_rate,
             )
@@ -300,7 +319,7 @@ class StructuredSE3StateEstimator(nn.Module):
         previous_rotation_carrier = (
             previous_rotation_amplitudes.unsqueeze(-1) * orbit(previous_rotation, new_templates)
             if context.mask.rotation
-            else torch.zeros_like(context_backward.rotation)
+            else torch.zeros_like(context_backward.rotation_carrier)
         )
         
         next_invariants = (
@@ -372,18 +391,177 @@ class StructuredSE3StateEstimator(nn.Module):
             context_sectors=context,
         )
 
-    def forward_with_zero_artifacts(self, context_rgb, context_time=None) -> SE3Prediction:
-        """Diagnostic route. Physical outputs are upstream of artifact replacement."""
+    @staticmethod
+    def _replace_context_artifacts(
+        context: SE3ContextLatent,
+        artifacts: torch.Tensor,
+    ) -> SE3ContextLatent:
+        return replace(
+            context, artifacts=artifacts,
+            packed=pack_context(
+                context.position,
+                context.rotation_6d,
+                context.translation_amplitudes,
+                context.rotation_amplitudes,
+                context.translation_carrier,
+                context.rotation_carrier,
+                context.physical_scalars,
+                artifacts,
+            ),
+        )
+
+    def _dt(
+        self,
+        context_time: torch.Tensor | None,
+        context_rgb: torch.Tensor,
+    ) -> torch.Tensor:
+        batch_size, frame_count = context_rgb.shape[:2]
+        if context_time is None:
+            context_time = (
+                torch.arange(
+                    frame_count,
+                    device=context_rgb.device,
+                    dtype=context_rgb.dtype,
+                )
+                * self.default_frame_dt
+            ).unsqueeze(0).expand(batch_size, -1)
+        dt = torch.diff(
+            context_time.to(
+                device=context_rgb.device,
+                dtype=context_rgb.dtype,
+            ),
+            dim=1,
+        )
+        return dt.unsqueeze(-1).clamp_min(1.0e-8)
+
+
+    def forward_with_zero_artifacts(self, context_rgb: torch.Tensor, context_time: torch.Tensor | None = None) -> SE3Prediction:
+        """Return a fully artifact-ablated diagnostic prediction.
+
+        Both context artifacts and motion artifacts are set to zero. All packed context/motion tensors and predicted context embeddings are rebuilt so the returned prediction is internally consistent.
+        """
         prediction = self.forward(context_rgb, context_time)
+        context = prediction.context_sectors
         motion = prediction.motion
 
-        forward = self._replace_motion_artifacts(
-            motion.forward_sectors, torch.zeros_like(motion.forward_sectors.artifacts)
+        zero_context_artifacts = torch.zeros_like(context.artifacts)
+        zero_forward_artifacts = torch.zeros_like(motion.forward_sectors.artifacts)
+        zero_backward_artifacts = torch.zeros_like(motion.backward_sectors.artifacts)
+
+        zero_context = self._replace_context_artifacts(
+            context,
+            zero_context_artifacts,
         )
-        backward = self._replace_motion_artifacts(
-            motion.backward_sectors, torch.zeros_like(motion.backward_sectors.artifacts)
+        zero_forward = self._replace_motion_artifacts(
+            motion.forward_sectors, zero_forward_artifacts
         )
+        zero_backward = self._replace_motion_artifacts(
+            motion.backward_sectors, zero_backward_artifacts
+        )
+
+        zero_next_artifacts = torch.zeros_like(motion.predicted_next_artifacts)
+        zero_previous_artifacts = torch.zeros_like(motion.predicted_previous_artifacts)
+
+        zero_next_embedding = pack_context(
+            motion.predicted_next_position,
+            matrix_to_rotation_6d(motion.predicted_next_rotation),
+            (
+                context.translation_amplitudes[:, :-1]
+                + self._dt(context_time, context_rgb) * zero_forward.translation_amplitude_rates
+            ).clamp_min(0.0),
+            (
+                context.rotation_amplitudes[:, :-1]
+                + self._dt(context_time, context_rgb) * zero_forward.rotation_amplitude_rates
+            ).clamp_min(0.0),
+            prediction.motion.predicted_next_embedding.new_zeros(
+                *motion.predicted_next_position.shape[:-1],
+                self.context_head.layout.channels,
+                3,
+            ) if not context.mask.translation else (
+                motion.predicted_next_position.unsqueeze(-2)
+                + (
+                    context.translation_amplitudes[:, :-1]
+                    + self._dt(context_time, context_rgb) * zero_forward.translation_amplitude_rates
+                ).clamp_min(0.0).unsqueeze(-1)
+                * self.context_head.templates.to(motion.predicted_next_position)
+            ),
+            prediction.motion.predicted_next_embedding.new_zeros(
+                *motion.predicted_next_position.shape[:-1],
+                self.context_head.layout.channels,
+                3,
+            ) if not context.mask.rotation else (
+                (
+                    context.rotation_amplitudes[:, :-1]
+                    + self._dt(context_time, context_rgb) * zero_forward.rotation_amplitude_rates
+                ).clamp_min(0.0).unsqueeze(-1)
+                * orbit(
+                    motion.predicted_next_rotation,
+                    self.context_head.templates.to(motion.predicted_next_rotation),
+                )
+            ),
+            motion.predicted_next_invariants,
+            zero_next_artifacts,
+        )
+        zero_previous_embedding = pack_context(
+            motion.predicted_previous_position,
+            matrix_to_rotation_6d(motion.predicted_previous_rotation),
+            (
+                context.translation_amplitudes[:, 1:]
+                + self._dt(context_time, context_rgb) * zero_backward.translation_amplitude_rates
+            ).clamp_min(0.0),
+            (
+                context.rotation_amplitudes[:, 1:]
+                + self._dt(context_time, context_rgb) * zero_backward.rotation_amplitude_rates
+            ).clamp_min(0.0),
+            prediction.motion.predicted_previous_embedding.new_zeros(
+                *motion.predicted_previous_position.shape[:-1],
+                self.context_head.layout.channels,
+                3,
+            ) if not context.mask.translation else (
+                motion.predicted_previous_position.unsqueeze(-2)
+                + (
+                    context.translation_amplitudes[:, 1:]
+                    + self._dt(context_time, context_rgb) * zero_backward.translation_amplitude_rates
+                ).clamp_min(0.0).unsqueeze(-1)
+                * self.context_head.templates.to(motion.predicted_previous_position)
+            ),
+            prediction.motion.predicted_previous_embedding.new_zeros(
+                *motion.predicted_previous_position.shape[:-1],
+                self.context_head.layout.channels,
+                3,
+            ) if not context.mask.rotation else (
+                (
+                    context.rotation_amplitudes[:, 1:]
+                    + self._dt(context_time, context_rgb) * zero_backward.rotation_amplitude_rates
+                ).clamp_min(0.0).unsqueeze(-1)
+                * orbit(
+                    motion.predicted_previous_rotation,
+                    self.context_head.templates.to(motion.predicted_previous_rotation),
+                )
+            ),
+            motion.predicted_previous_invariants,
+            zero_previous_artifacts,
+        )
+
+        zero_motion = replace(
+            motion,
+            forward_sectors=zero_forward,
+            backward_sectors=zero_backward,
+            predicted_next_embedding=zero_next_embedding,
+            predicted_previous_embedding=zero_previous_embedding,
+            predicted_next_artifacts=zero_next_artifacts,
+            predicted_previous_artifacts=zero_previous_artifacts,
+            artifact_residual_reconstruction_forward=torch.zeros_like(
+                motion.artifact_residual_reconstruction_forward
+            ),
+            artifact_residual_reconstruction_backward=torch.zeros_like(
+                motion.artifact_residual_reconstruction_backward
+            ),
+        )
+
         return replace(
             prediction,
-            motion=replace(motion, forward_sectors=forward, backward_sectors=backward),
+            from_latent=zero_context.packed,
+            context_sectors=zero_context,
+            motion=zero_motion,
         )

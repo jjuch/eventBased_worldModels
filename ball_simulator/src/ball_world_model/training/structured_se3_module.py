@@ -43,7 +43,7 @@ class StructuredSE3ObservabilityModule(L.LightningModule):
         artifact_cross_covariance_weight: float = 0.001,
         geometric_channels: int = 24,
         physical_invariant_dim: int = 16,
-        latent_architecture: str = "structured_so3_artifacts",
+        latent_architecture: str = "structured_se3_artifacts",
         **model: object
     ) -> None:
         super().__init__()

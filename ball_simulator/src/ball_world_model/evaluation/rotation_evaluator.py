@@ -14,8 +14,6 @@ import torch
 from ball_world_model.models.rotation import quaternion_xyzw_to_matrix
 from .metrics import apply_linear_probe, effective_rank, fit_linear_probe, regression_metrics
 from .model_loader import denormalised_prediction
-from .structured_se3_evaluator import evaluate_structured_se3
-from .artifact_disentanglement_evaluator import evaluate_artifact_disentanglement
 
 
 def _numpy(value):
@@ -327,6 +325,7 @@ def evaluate_loaded_rotation_observer(
     _trajectory_reports(records, output / "trajectories", settings.trajectory_plots, settings.seed)
     intervention_rows = _interventions(module, test_loader, device, settings.maximum_test_windows, settings.seed)
     _write_csv(output / "interventions.csv", intervention_rows)
+
     probes, statistics = _probes(
         module, train_loader, test_loader, device,
         settings.maximum_probe_train_windows, settings.maximum_test_windows,
@@ -345,23 +344,4 @@ def evaluate_loaded_rotation_observer(
     }
     (output / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
 
-    # test SO3 latent if available
-    if hasattr(module.model, "context_head"):
-        evaluate_structured_se3(
-            module,
-            train_loader,
-            test_loader,
-            device,
-            output,
-            train_maximum=settings.maximum_probe_train_windows,
-            test_maximum=settings.maximum_test_windows,
-        )
-        evaluate_artifact_disentanglement(
-            module,
-            train_loader,
-            test_loader,
-            device,
-            output,
-            maximum=settings.maximum_probe_train_windows,
-        )
     return output.resolve()

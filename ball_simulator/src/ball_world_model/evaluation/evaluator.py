@@ -24,6 +24,7 @@ from .metrics import (
 from .model_loader import denormalised_prediction, load_kinematic_module
 from .rotation_evaluator import evaluate_loaded_rotation_observer
 from .structured_se3_evaluator import evaluate_structured_se3
+from .artifact_disentanglement_evaluator import evaluate_artifact_disentanglement
 from .plots import component_scatter, error_vs_speed, probe_plot, trajectory_plot
 
 
@@ -312,6 +313,62 @@ def probe_report(module, train_loader, test_loader, device, train_maximum: int, 
     return rows, activation_rows
 
 
+def _is_structured_se3(module) -> bool:
+    return getattr(module.hparams, "latent_architecture", None) == "structured_se3_artifacts"
+
+def _run_structured_extensions(
+    *,
+    module,
+    train_loader,
+    test_loader,
+    device,
+    output: Path,
+    settings,
+) -> dict[str, object]:
+    """Run all structured-latent diagnostics from one central owner."""
+    if not _is_structured_se3(module):
+        return {}
+
+    structured_report = evaluate_structured_se3(
+        module,
+        test_loader,
+        device,
+        output,
+        settings.maximum_test_windows,
+    )
+
+    reports : dict[str, object] = {
+        "structured_se3": structured_report,
+    }
+
+    # The current artifact evaluator probes angular-velocity leakage. Run it only when the rotational sector is active. TODO: A future translation artifact evaluator should probe linear velocity and relative translation instead.
+    if module.model.context_head.mask.rotation:
+        reports["artifact_disentanglement"] = (
+            evaluate_artifact_disentanglement(
+                module,
+                train_loader,
+                test_loader,
+                device,
+                output,
+                maximum=settings.maximum_probe_train_windows,
+            )
+        )
+
+    return reports
+
+def _merge_summary(output: Path, additions: dict[str, object]) -> None:
+    """Merge extension reports into the root summary written by a task evaluator."""
+    if not additions:
+        return
+    summary_path = output / "summary.json"
+    summary = {}
+    if summary_path.is_file():
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary.update(additions)
+    summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+
+
 def evaluate_kinematic_observer(
     *,
     checkpoint_path: str | Path,
@@ -329,8 +386,11 @@ def evaluate_kinematic_observer(
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     module = load_kinematic_module(checkpoint_path, device=device)
-    if module.hparams.task == "rotation": # TODO: should this be extended to mask == 'rotation', because 'combined' should also trigger this.
-        return evaluate_loaded_rotation_observer(
+
+
+    task = module.hparams.task
+    if task == "rotation": 
+        evaluate_loaded_rotation_observer(
             module=module,
             train_loader=train_loader,
             test_loader=test_loader,
@@ -340,6 +400,16 @@ def evaluate_kinematic_observer(
             output=output,
             settings=settings,
         )
+        additions = _run_structured_extensions(
+            module=module,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            output=output,
+            settings=settings,
+        )
+        _merge_summary(output, additions)
+        return output.resolve()
 
     records = collect_predictions(module, test_loader, device, settings.maximum_test_windows)
     summary = aggregate_report(records, output)
@@ -377,9 +447,15 @@ def evaluate_kinematic_observer(
         "probes": probes,
         "representation_statistics": representation_statistics,
     }
-    if getattr(module.hparams, "latent_architecture", None) == "structured_se3_artifacts":
-        report["structured_se3"] = evaluate_structured_se3(
-            module, test_loader, device, output, settings.maximum_test_windows
+    report.update(
+        _run_structured_extensions(
+            module=module,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            output=output,
+            settings=settings,
         )
+    )
     (output / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return output.resolve()

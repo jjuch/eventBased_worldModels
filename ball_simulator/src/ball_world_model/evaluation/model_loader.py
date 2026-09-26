@@ -61,7 +61,7 @@ def load_kinematic_module(
     arguments = {key: value for key, value in hyperparameters.items() if key in _ALLOWED_HYPERPARAMETERS}
     module_class = (
         StructuredSE3ObservabilityModule
-        if arguments.get("latent_architecture") == "structured_so3_artifacts"
+        if arguments.get("latent_architecture") == "structured_se3_artifacts"
         else KinematicObservabilityModule
     )
     module_class_name = module_class.__name__
