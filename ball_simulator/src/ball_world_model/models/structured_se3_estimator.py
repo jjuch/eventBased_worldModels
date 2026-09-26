@@ -561,7 +561,7 @@ class StructuredSE3StateEstimator(nn.Module):
 
         return replace(
             prediction,
-            from_latent=zero_context.packed,
+            frame_latent=zero_context.packed,
             context_sectors=zero_context,
             motion=zero_motion,
         )
