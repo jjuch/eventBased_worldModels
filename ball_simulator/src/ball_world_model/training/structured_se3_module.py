@@ -15,8 +15,9 @@ from .kinematic_module import KinematicStatistics
 
 
 class StructuredSE3ObservabilityModule(L.LightningModule):
-    # The structured estimator exposes omega directly in physical rad/s.
-    outputs_physical_units = True # TODO: find a more elegant to circumvent this; hack for model_loader > denormalised_prediction
+    # The structured SE(3) estimator exposes every canonical physical state directly in physical units:
+    # position [m], linear velocity [m/s],rotation matrix, and angular velocity [rad/s].
+    outputs_physical_units = True
 
     def __init__(
         self, 
