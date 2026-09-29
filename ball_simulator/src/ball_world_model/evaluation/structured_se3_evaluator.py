@@ -28,7 +28,6 @@ def _np(value):
 
 
 def _write_csv(path: Path, rows: list[dict]) -> None:
-    path.parents.mkdir(parents=True, exist_ok=True)
     if not rows:
         return
     keys = list(dict.fromkeys(key for row in rows for key in row))
@@ -79,7 +78,7 @@ def _collect(module, loader, device, maximum_windows: int) -> dict[str, np.ndarr
         time = batch["context_time"].to(device)
         prediction = module.model(rgb, time)
         context = prediction.context_sectors
-        motion = prediction.motion_sectors
+        motion = prediction.motion
         forward = motion.forward_sectors
 
         target_position = batch["context_position"].to(device)
