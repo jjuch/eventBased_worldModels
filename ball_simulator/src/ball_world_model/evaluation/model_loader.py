@@ -73,23 +73,45 @@ def load_kinematic_module(
     return module
 
 
-def denormalised_prediction(module, prediction) -> dict[str, torch.Tensor]:
+def denormalised_prediction(
+    module, 
+    prediction
+) -> dict[str, torch.Tensor]:
+    """Return physical state predictions.
+
+    Structured SE(3) models expose position, linear velocity,
+    angular velocity, and rotation directly in physical units.
+
+    Baseline models expose normalised Euclidean quantities and
+    must be denormalised here.
+    """
     result: dict[str, torch.Tensor] = {}
+
+    outputs_physical_units = bool(
+        getattr(module, "outputs_physical_units", False)
+    )
     if prediction.position is not None:
-        result["position"] = module._denormalise(
-            prediction.position, module.position_mean, module.position_std
-        )
+        if outputs_physical_units:
+            result["position"] = prediction.position
+        else:
+            result["position"] = module._denormalise(
+                prediction.position, module.position_mean, module.position_std
+            )
+
     if prediction.linear_velocity is not None:
-        result["linear_velocity"] = module._denormalise(
-            prediction.linear_velocity,
-            module.linear_velocity_mean,
-            module.linear_velocity_std,
-        )
+        if outputs_physical_units:
+            result["linear_velocity"] = prediction.linear_velocity
+        else:
+            result["linear_velocity"] = module._denormalise(
+                prediction.linear_velocity,
+                module.linear_velocity_mean,
+                module.linear_velocity_std,
+            )
+
     if prediction.angular_velocity is not None:
-        if getattr(module, "outputs_physical_units", False):
+        if outputs_physical_units:
             result["angular_velocity"] = prediction.angular_velocity
         else:
-            print("[denormalise_prediction] The module does not denormalise the angular angular velocity.")
             result["angular_velocity"] = module._denormalise(
                 prediction.angular_velocity,
                 module.angular_velocity_mean,
