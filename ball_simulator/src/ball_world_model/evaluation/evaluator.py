@@ -23,7 +23,8 @@ from .metrics import (
 )
 from .model_loader import denormalised_prediction, load_kinematic_module
 from .rotation_evaluator import evaluate_loaded_rotation_observer
-from .structured_se3_evaluator import evaluate_structured_se3
+from .structured_se3_evaluator import evaluate_structured_se3, evaluate_structured_se3_sectors
+from .posthoc_velocity_evaluator import evaluate_posthoc_velocity_decoders
 from .artifact_disentanglement_evaluator import evaluate_artifact_disentanglement
 from .plots import component_scatter, error_vs_speed, probe_plot, trajectory_plot
 
@@ -34,6 +35,11 @@ class EvaluationSettings:
     maximum_probe_train_windows: int = 5_000
     trajectory_plots: int = 12
     seed: int = 20260824
+    posthoc_velocity_epochs: int = 40
+    posthoc_velocity_hidden_dim: int = 128
+    posthoc_velocity_batch_size: int = 2_048
+    posthoc_velocity_learning_rate: float = 1.0e-3
+
 
 
 def _configuration(training_config_path: Path):
@@ -277,6 +283,7 @@ def extract_representations(module, loader, device, maximum_windows: int):
 def probe_report(module, train_loader, test_loader, device, train_maximum: int, test_maximum: int, output: Path):
     train_features, train_targets, _ = extract_representations(module, train_loader, device, train_maximum)
     test_features, test_targets, diagnostics = extract_representations(module, test_loader, device, test_maximum)
+
     rows = []
     for representation in train_features:
         for quantity in ("position", "velocity"):
@@ -337,12 +344,41 @@ def _run_structured_extensions(
         settings.maximum_test_windows,
     )
 
+    structured_sectors_report = evaluate_structured_se3_sectors(
+        module,
+        train_loader,
+        test_loader,
+        device,
+        output,
+        train_maximum=settings.maximum_probe_train_windows,
+        test_maximum=settings.maximum_test_windows,
+    ),
+
+
     reports : dict[str, object] = {
         "structured_se3": structured_report,
+        "sector_analysis": structured_sectors_report,
     }
 
-    # The current artifact evaluator probes angular-velocity leakage. Run it only when the rotational sector is active. TODO: A future translation artifact evaluator should probe linear velocity and relative translation instead.
-    if module.model.context_head.mask.rotation:
+    mask = module.model.context_head.mask
+    if mask.translation:
+        posthoc_velocity_decoder = evaluate_posthoc_velocity_decoders(
+            module,
+            train_loader,
+            test_loader,
+            device,
+            output,
+            train_maximum=settings.maximum_probe_train_windows,
+            test_maximum=settings.maximum_test_windows,
+            epochs=settings.posthoc_velocity_epochs,
+            hidden_dim=settings.posthoc_velocity_hidden_dim,
+            batch_size=settings.posthoc_velocity_batch_size,
+            learning_rate=settings.posthoc_velocity_learning_rate,
+            seed=settings.seed,
+        )
+        reports["posthoc_velocity"] = posthoc_velocity_decoder
+
+    if mask.rotation:
         reports["artifact_disentanglement"] = (
             evaluate_artifact_disentanglement(
                 module,
@@ -368,51 +404,20 @@ def _merge_summary(output: Path, additions: dict[str, object]) -> None:
     summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
 
 
-
-def evaluate_kinematic_observer(
+def _evaluate_translation_observer(
     *,
-    checkpoint_path: str | Path,
-    training_config_path: str | Path,
-    output_directory: str | Path,
-    settings: EvaluationSettings = EvaluationSettings(),
-) -> Path:
-    output = Path(output_directory)
+    module,
+    train_loader,
+    test_loader,
+    device,
+    checkpoint_path,
+    training_config_path,
+    output: Path,
+    settings,
+) -> dict[str, object]:
     output.mkdir(parents=True, exist_ok=True)
-    _, data_config, manifest = _configuration(Path(training_config_path))
-    test_data = RenderedTrajectoryDataset(manifest, data_config, split="test")
-    train_data = RenderedTrajectoryDataset(manifest, data_config, split="train")
-    test_loader = build_dataloader(test_data, data_config, shuffle=False)
-    train_loader = build_dataloader(train_data, data_config, shuffle=False)
-
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    module = load_kinematic_module(checkpoint_path, device=device)
-
-
-    task = module.hparams.task
-    if task == "rotation": 
-        evaluate_loaded_rotation_observer(
-            module=module,
-            train_loader=train_loader,
-            test_loader=test_loader,
-            device=device,
-            checkpoint_path=checkpoint_path,
-            training_config_path=training_config_path,
-            output=output,
-            settings=settings,
-        )
-        additions = _run_structured_extensions(
-            module=module,
-            train_loader=train_loader,
-            test_loader=test_loader,
-            device=device,
-            output=output,
-            settings=settings,
-        )
-        _merge_summary(output, additions)
-        return output.resolve()
-
     records = collect_predictions(module, test_loader, device, settings.maximum_test_windows)
-    summary = aggregate_report(records, output)
+    aggregate = aggregate_report(records, output)
     trajectory_reports(
         records,
         output / "trajectories",
@@ -436,17 +441,132 @@ def evaluate_kinematic_observer(
         settings.maximum_test_windows,
         output / "probes",
     )
-
     report = {
         "checkpoint": str(Path(checkpoint_path).resolve()),
         "training_config": str(Path(training_config_path).resolve()),
+        "task": module.hparams.task,
         "test_windows": len(records),
         "device": str(device),
-        "aggregate": summary,
+        "aggregate": aggregate,
         "interventions": interventions,
         "probes": probes,
         "representation_statistics": representation_statistics,
     }
+    (output / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    return report
+
+
+    
+
+
+def evaluate_kinematic_observer(
+    *,
+    checkpoint_path: str | Path,
+    training_config_path: str | Path,
+    output_directory: str | Path,
+    settings: EvaluationSettings = EvaluationSettings(),
+) -> Path:
+    output = Path(output_directory)
+    output.mkdir(parents=True, exist_ok=True)
+    _, data_config, manifest = _configuration(Path(training_config_path))
+    test_data = RenderedTrajectoryDataset(manifest, data_config, split="test")
+    train_data = RenderedTrajectoryDataset(manifest, data_config, split="train")
+    test_loader = build_dataloader(test_data, data_config, shuffle=False)
+    train_loader = build_dataloader(train_data, data_config, shuffle=False)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    module = load_kinematic_module(checkpoint_path, device=device)
+
+    if output.exists():
+        import shutil
+        shutil.rmtree(output)
+    output.mkdir(parents=True, exist_ok=True)
+
+    task = module.hparams.task
+
+    if task == "rotation": 
+        evaluate_loaded_rotation_observer(
+            module=module,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            checkpoint_path=checkpoint_path,
+            training_config_path=training_config_path,
+            output=output,
+            settings=settings,
+        )
+        additions = _run_structured_extensions(
+            module=module,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            output=output,
+            settings=settings,
+        )
+        _merge_summary(output, additions)
+        return output.resolve()
+
+    if task == "combined":
+        translation_output = output / "translation"
+        rotation_output = output / "rotation"
+
+        translation_report = _evaluate_translation_observer(
+            module=module,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            checkpoint_path=checkpoint_path,
+            training_config_path=training_config_path,
+            output=translation_output,
+            settings=settings,
+        )
+        evaluate_loaded_rotation_observer(
+            module=module,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            checkpoint_path=checkpoint_path,
+            training_config_path=training_config_path,
+            output=rotation_output,
+            settings=settings,
+        )
+        rotation_report = json.loads(
+            (rotation_output / "summary.json").read_text(encoding="utf-8")
+        )
+        common = _run_structured_extensions(
+            module=module,
+            train_loader=train_loader,
+            test_loader=test_loader,
+            device=device,
+            output=output,
+            settings=settings,
+        )
+        report = {
+            "checkpoint": str(Path(checkpoint_path).resolve()),
+            "training_config": str(Path(training_config_path).resolve()),
+            "task": "combined",
+            "device": str(device),
+            "translation": translation_report,
+            "rotation": rotation_report,
+            **common,
+        }
+        (output / "summary.json").write_text(
+            json.dumps(report, indent=2),
+            encoding="utf-8",
+        )
+        return output.resolve()
+
+
+    report = _evaluate_translation_observer(
+        module=module,
+        train_loader=train_loader,
+        test_loader=test_loader,
+        device=device,
+        checkpoint_path=checkpoint_path,
+        training_config_path=training_config_path,
+        output=output,
+        settings=settings,   
+    )
     report.update(
         _run_structured_extensions(
             module=module,
