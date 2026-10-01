@@ -17,19 +17,16 @@ model:
   dropout: 0.0
   learning_rate: 0.0003
   weight_decay: 0.05
-  position_weight: 1.0
-  velocity_weight: 1.0
+  configuration_weight: 1.0
+  twist_weight: 1.0
+  orientation_scale_deg: 5.0
+  diagnostic_gradient_interval: 100
   latent_prediction_weight: 0.1
-  kinematic_weight: 0.01
   reverse_weight: 0.1
   variance_weight: 0.01
-  rotation_weight: 1.0
-  angular_velocity_weight: 1.0
   world_angular_velocity: true
-  orientation_weight: 1.0
-  omega_weight: 1.0
-  carrier_weight: 0.25
-  tangent_weight: 0.05
+  carrier_weight: 0.1
+  tangent_weight: 0.1
   group_weight: 0.1
   artifact_weight: 0.01
   amplitude_weight: 0.01
