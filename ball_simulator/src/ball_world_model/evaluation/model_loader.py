@@ -19,22 +19,74 @@ _STATISTIC_NAMES = (
 )
 
 _ALLOWED_HYPERPARAMETERS = {
-    "task", "embedding_dim", "keypoints", "motion_dim", "decoder_hidden_dim",
-    "refinement_hidden_dim", "refinement_iterations", "delta_momentum",
-    "default_frame_dt", "dropout", "temporal_depth", "learning_rate", "weight_decay",
-    "position_weight", "velocity_weight", "latent_prediction_weight", "kinematic_weight",
-    "reverse_weight", "variance_weight", "invariant_prediction_weight",
-    "invariant_variance_weight", "rotation_weight", "angular_velocity_weight",
-    "rotation_kinematic_weight", "rotation_reverse_weight", "state_weight",
-    "translation_consistency_weight", "rotation_consistency_weight",
-    "world_angular_velocity", "latent_architecture", "descriptor_dim",
-    "orientation_weight", "omega_weight", "carrier_weight", "tangent_weight",
-    "group_weight", "artifact_weight", "amplitude_weight", "geometric_channels",
-    "physical_invariant_dim", "artifact_mode", "physical_feature_rate_weight",
-    "artifact_residual_weight", "artifact_cross_covariance_weight",
-    "artifact_adversary_omega_weight", "artifact_adversary_rotation_weight",
-    "artifact_adversary_max_strength", "artifact_adversary_warmup_epochs",
-    "artifact_residual_hidden_channels", "artifact_adversary_hidden_dim",
+    "task",
+    "embedding_dim",
+    "keypoints",
+    "motion_dim",
+    "decoder_hidden_dim",
+    "refinement_hidden_dim",
+    "refinement_iterations",
+    "delta_momentum",
+    "default_frame_dt",
+    "dropout",
+    "temporal_depth",
+    "learning_rate",
+    "weight_decay",
+
+    # Baseline observer parameters.
+    "position_weight",
+    "velocity_weight",
+    "latent_prediction_weight",
+    "kinematic_weight",
+    "reverse_weight",
+    "variance_weight",
+    "rotation_weight",
+    "angular_velocity_weight",
+    "rotation_kinematic_weight",
+    "rotation_reverse_weight",
+    "state_weight",
+    "translation_consistency_weight",
+    "rotation_consistency_weight",
+    "world_angular_velocity",
+
+    # Structured architecture.
+    "latent_architecture",
+    "descriptor_dim",
+    "orientation_weight",
+    "omega_weight",
+    "carrier_weight",
+    "tangent_weight",
+    "group_weight",
+    "artifact_weight",
+    "amplitude_weight",
+    "geometric_channels",
+    "physical_invariant_dim",
+
+    # Balanced unified SE(3) objective.
+    "configuration_weight",
+    "twist_weight",
+    "orientation_scale_deg",
+
+    # Camera-relative diagnostics.
+    "diagnostic_gradient_interval",
+    "camera_location",
+    "camera_target",
+
+    # Artifact model.
+    "artifact_mode",
+    "physical_feature_rate_weight",
+    "artifact_residual_weight",
+    "artifact_cross_covariance_weight",
+    "artifact_adversary_omega_weight",
+    "artifact_adversary_rotation_weight",
+    "artifact_adversary_max_strength",
+    "artifact_adversary_warmup_epochs",
+    "artifact_residual_hidden_channels",
+    "artifact_adversary_hidden_dim",
+
+    # Structured scalar-sector objectives.
+    "invariant_prediction_weight",
+    "invariant_variance_weight",
 }
 
 def _statistics_from_state_dict(state_dict: dict[str, torch.Tensor]) -> KinematicStatistics:

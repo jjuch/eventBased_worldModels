@@ -274,7 +274,7 @@ class StructuredSE3ObservabilityModule(L.LightningModule):
 
 
         total = (
-            self.self.hparams.configuration_weight * configuration_loss
+            self.hparams.configuration_weight * configuration_loss
             + self.hparams.twist_weight * twist_loss
             + self.hparams.carrier_weight * carrier_loss
             + self.hparams.tangent_weight * tangent_loss
