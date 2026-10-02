@@ -17,24 +17,26 @@ model:
   dropout: 0.0
   learning_rate: 0.0003
   weight_decay: 0.05
-  configuration_weight: 1.0
-  twist_weight: 1.0
+  configuration_weight: 2.0
+  twist_weight: 2.0
+  context_twist_weight: 1.0
+  interval_twist_variance_weight: 0.1
   orientation_scale_deg: 5.0
   diagnostic_gradient_interval: 100
   latent_prediction_weight: 0.1
-  reverse_weight: 0.1
-  variance_weight: 0.01
+  reverse_weight: 0.05
+  variance_weight: 0.005
   world_angular_velocity: true
-  carrier_weight: 0.1
-  tangent_weight: 0.1
-  group_weight: 0.1
-  artifact_weight: 0.01
+  carrier_weight: 0.05
+  tangent_weight: 0.05
+  group_weight: 0.05
+  artifact_weight: 0.005
   amplitude_weight: 0.01
-  invariant_prediction_weight: 0.01
-  invariant_variance_weight: 0.005
-  physical_feature_rate_weight: 0.01
-  artifact_residual_weight: 0.01
-  artifact_cross_covariance_weight: 0.001
+  invariant_prediction_weight: 0.005
+  invariant_variance_weight: 0.0025
+  physical_feature_rate_weight: 0.005
+  artifact_residual_weight: 0.005
+  artifact_cross_covariance_weight: 0.0005
 training:
   output_directory: generated-at-runtime
   epochs: 75
