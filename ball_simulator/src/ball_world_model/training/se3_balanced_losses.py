@@ -159,6 +159,7 @@ def context_twist_loss(
     return dimensionless_twist_loss(
         predicted_velocity.mean(dim=1) if predicted_velocity is not None else None,
         target_velocity.mean(dim=1) if target_velocity is not None else None,
+        velocity_scale,
         predicted_omega.mean(dim=1) if predicted_omega is not None else None,
         target_omega.mean(dim=1) if target_omega is not None else None,
         omega_scale,

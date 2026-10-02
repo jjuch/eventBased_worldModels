@@ -25,6 +25,7 @@ from .model_loader import denormalised_prediction, load_kinematic_module
 from .rotation_evaluator import evaluate_loaded_rotation_observer
 from .structured_se3_evaluator import evaluate_structured_se3, evaluate_structured_se3_sectors
 from .posthoc_velocity_evaluator import evaluate_posthoc_velocity_decoders
+from .context_twist_evaluator import evaluate_context_twist
 from .artifact_disentanglement_evaluator import evaluate_artifact_disentanglement
 from .plots import component_scatter, error_vs_speed, probe_plot, trajectory_plot
 
@@ -354,10 +355,19 @@ def _run_structured_extensions(
         test_maximum=settings.maximum_test_windows,
     )
 
+    context_twist_report = evaluate_context_twist(
+        module,
+        test_loader,
+        device,
+        output,
+        settings.maximum_test_windows,
+    )
+
 
     reports : dict[str, object] = {
         "structured_se3": structured_report,
         "sector_analysis": structured_sectors_report,
+        "context_twist": context_twist_report,
     }
 
     mask = module.model.context_head.mask
@@ -454,9 +464,6 @@ def _evaluate_translation_observer(
     }
     (output / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
     return report
-
-
-    
 
 
 def evaluate_kinematic_observer(
