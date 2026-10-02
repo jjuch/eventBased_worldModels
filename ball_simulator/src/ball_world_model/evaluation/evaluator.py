@@ -352,7 +352,7 @@ def _run_structured_extensions(
         output,
         train_maximum=settings.maximum_probe_train_windows,
         test_maximum=settings.maximum_test_windows,
-    ),
+    )
 
 
     reports : dict[str, object] = {

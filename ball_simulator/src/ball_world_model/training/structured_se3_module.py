@@ -19,6 +19,8 @@ from .se3_balanced_losses import (
     dimensionless_group_loss,
     dimensionless_reverse_loss,
     dimensionless_twist_loss,
+    context_twist_loss,
+    interval_twist_variance_loss,
     gradient_norm,
     rms_normalised_loss,
     safe_scale,
@@ -40,21 +42,23 @@ class StructuredSE3ObservabilityModule(L.LightningModule):
         task: str = "combined", 
         learning_rate: float = 3e-4,
         weight_decay: float = 0.05,
-        configuration_weight: float = 1.0,
-        twist_weight: float = 1.0,
+        configuration_weight: float = 2.0,
+        twist_weight: float = 2.0,
+        context_twist_weight: float = 1.0,
+        interval_twist_variance_weight: float = 0.1,
         orientation_scale_deg: float = 5.0,
-        carrier_weight: float = 0.25,
+        carrier_weight: float = 0.05,
         tangent_weight: float = 0.05, 
-        group_weight: float = 0.1, 
-        reverse_weight: float = 0.1, 
-        artifact_weight: float = 0.01,
+        group_weight: float = 0.05, 
+        reverse_weight: float = 0.05, 
+        artifact_weight: float = 0.005,
         amplitude_weight: float = 0.01,
-        invariant_prediction_weight: float = 0.01,
-        invariant_variance_weight: float = 0.005,
-        variance_weight: float = 0.01,
-        physical_feature_rate_weight: float = 0.01,
-        artifact_residual_weight: float = 0.01,
-        artifact_cross_covariance_weight: float = 0.001,
+        invariant_prediction_weight: float = 0.005,
+        invariant_variance_weight: float = 0.0025,
+        variance_weight: float = 0.005,
+        physical_feature_rate_weight: float = 0.005,
+        artifact_residual_weight: float = 0.005,
+        artifact_cross_covariance_weight: float = 0.0005,
         geometric_channels: int = 24,
         physical_invariant_dim: int = 16,
         latent_architecture: str = "structured_se3_artifacts",
@@ -148,6 +152,20 @@ class StructuredSE3ObservabilityModule(L.LightningModule):
             self.linear_velocity_std if mask.translation else None,
             motion.forward_sectors.angular_velocity if mask.rotation else None,
             target_omega[:, :-1] if mask.rotation else None,
+            self.angular_velocity_std if mask.rotation else None,
+        )
+        context_twist = context_twist_loss(
+            motion.forward_sectors.linear_velocity if mask.translation else None,
+            target_velocity[:, :-1] if mask.translation else None,
+            self.linear_velocity_std if mask.translation else None,
+            motion.forward_sectors.angular_velocity if mask.rotation else None,
+            target_omega[:, :-1] if mask.rotation else None,
+            self.angular_velocity_std if mask.rotation else None,
+        )
+        interval_twist_variance = interval_twist_variance_loss(
+            motion.forward_sectors.linear_velocity if mask.translation else None,
+            self.linear_velocity_std if mask.translation else None,
+            motion.forward_sectors.angular_velocity if mask.rotation else None,
             self.angular_velocity_std if mask.rotation else None,
         )
 
@@ -276,6 +294,8 @@ class StructuredSE3ObservabilityModule(L.LightningModule):
         total = (
             self.hparams.configuration_weight * configuration_loss
             + self.hparams.twist_weight * twist_loss
+            + self.hparams.context_twist_weight * context_twist
+            + self.hparams.interval_twist_variance_weight * interval_twist_variance
             + self.hparams.carrier_weight * carrier_loss
             + self.hparams.tangent_weight * tangent_loss
             + self.hparams.amplitude_weight * amplitude_loss
@@ -295,6 +315,8 @@ class StructuredSE3ObservabilityModule(L.LightningModule):
             "position_loss_normalised": position_loss.detach(),
             "orientation_loss_normalised": orientation_loss.detach(),
             "twist_loss": twist_loss.detach(),
+            "context_twist_loss": context_twist.detach(),
+            "interval_twist_variance_loss": interval_twist_variance.detach(),
             "carrier_loss_balanced": carrier_loss.detach(),
             "tangent_loss_balanced": tangent_loss.detach(),
             "group_loss_balanced": group_loss.detach(),
@@ -332,6 +354,8 @@ class StructuredSE3ObservabilityModule(L.LightningModule):
 
         diagnostic_losses = {
             "twist": twist_loss,
+            "context_twist": context_twist,
+            "interval_twist_variance": interval_twist_variance,
             "translation_tangent": translation_tangent_loss,
             "rotation_tangent": rotation_tangent_loss,
             "translation_group": translation_group_loss,
