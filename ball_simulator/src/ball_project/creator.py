@@ -7,23 +7,7 @@ from .models import ExperimentInfo, ProjectManifest
 from .template_registry import definition, template_text
 
 
-DIRECTORIES = (
-    "configs/generated",
-    "data/trajectories",
-    "data/rendered",
-    "data/manifests",
-    "outputs/training",
-    "outputs/checkpoints",
-    "outputs/tensorboard",
-    "outputs/evaluation",
-    "outputs/inspection",
-    "reports",
-    "logs/trajectories",
-    "logs/rendering",
-    "logs/training",
-    ".ball_project/effective",
-    ".ball_project/records",
-)
+INITIAL_DIRECTORIES = ("configs", ".ball_project")
 
 def create_project(
     name: str,
@@ -44,7 +28,7 @@ def create_project(
         raise FileExistsError(f"Project path already exists: {root}.")
     root.mkdir(parents=True)
 
-    for directory in DIRECTORIES:
+    for directory in INITIAL_DIRECTORIES:
         (root / directory).mkdir(parents=True, exist_ok=True)
 
     manifest = ProjectManifest(

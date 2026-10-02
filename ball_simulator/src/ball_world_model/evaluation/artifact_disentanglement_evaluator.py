@@ -1,20 +1,11 @@
 """Evaluate artifact utility, physical leakage, and post-split bypass."""
 from __future__ import annotations
 
-import csv
 from pathlib import Path
 import numpy as np
 import torch
 
-def _write_csv(path: Path, rows: list[dict]) -> None:
-    if not rows:
-        return
-    keys = list(dict.fromkeys(key for row in rows for key in row))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=keys)
-        writer.writeheader()
-        writer.writerows(rows)
+from .utils import write_csv
 
 
 def _ridge(train_x, train_y, test_x, test_y, ridge=1e-4):
@@ -79,7 +70,7 @@ def evaluate_artifact_disentanglement(module, train_loader, test_loader, device,
     test = collect_artifact_batches(module, test_loader, device, maximum)
 
     rows = _ridge(train["artifacts"], train["omega"], test["artifacts"], test["omega"])
-    _write_csv(output / "artifact_omega_probe_csv", rows)
+    write_csv(output / "artifact_omega_probe_csv", rows)
 
     summary = [
         {
@@ -93,6 +84,6 @@ def evaluate_artifact_disentanglement(module, train_loader, test_loader, device,
             "p95": float(np.quantile(test["physical_delta"], 0.95))
         },
     ]
-    _write_csv(output / "artifact_utility_and_bypass.csv", summary)
+    write_csv(output / "artifact_utility_and_bypass.csv", summary)
     return rows, summary
 

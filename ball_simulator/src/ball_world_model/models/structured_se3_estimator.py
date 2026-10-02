@@ -6,8 +6,10 @@ from dataclasses import dataclass, replace
 
 import torch
 from torch import nn
+import torch.nn.functional as F
 
 from .kinematic_encoder import CoordinateAwareFrameEncoder
+from .contextual_twist import ContextTwistAggregator
 from .latent_motion import RunningDeltaNormaliser, SpatialMotionEncoder
 from .structured_se3 import (
     SE3ContextHead,
@@ -52,6 +54,10 @@ class SE3MotionDiagnostics:
     artifact_residual_target_backward: torch.Tensor
     artifact_residual_reconstruction_forward: torch.Tensor
     artifact_residual_reconstruction_backward: torch.Tensor
+    forward_twist_attention: torch.Tensor
+    backward_twist_attention: torch.Tensor
+    context_linear_velocity: torch.Tensor
+    context_angular_velocity: torch.Tensor
     linear_refinement_residuals: tuple = ()
     rotational_refinement_residuals: tuple = ()
 
@@ -108,11 +114,16 @@ class StructuredSE3StateEstimator(nn.Module):
         delta_momentum=0.01,
         artifact_mode="physics_residual_adversarial",
         artifact_residual_hidden_channels=128,
+        contextual_twist_hidden_dim=128,
+        twist_inference="pairwise",
         **_: object) -> None:
         super().__init__()
         self.task = task
         self.default_frame_dt = float(default_frame_dt)
         self.artifact_mode = artifact_mode
+        if twist_inference not in {"pairwise", "contextual"}:
+            raise ValueError("twist_inference must be pairwise or contextual.")
+        self.twist_inference = twist_inference
         self.frame_encoder = CoordinateAwareFrameEncoder(
             embedding_dim=descriptor_dim, 
             keypoints=keypoints
@@ -126,6 +137,16 @@ class StructuredSE3StateEstimator(nn.Module):
         )
         self.motion_head = SE3MotionHead(
             motion_dim, motion_dim, geometric_channels, physical_invariant_dim, task
+        )
+        self.context_twist = (
+            ContextTwistAggregator(
+                motion_dim,
+                contextual_twist_hidden_dim,
+                use_translation=self.context_head.mask.translation,
+                use_rotation=self.context_head.mask.rotation,
+            )
+            if self.twist_inference == "contextual"
+            else None
         )
 
         context_layout = self.context_head.layout
@@ -189,6 +210,64 @@ class StructuredSE3StateEstimator(nn.Module):
     @staticmethod
     def _frame(pair: torch.Tensor) -> torch.Tensor:
         return torch.cat((pair, pair[:, -1:]), dim=1)
+
+
+    @staticmethod
+    def _replace_motion_twist(
+        sector: SE3MotionLatent,
+        context: SE3ContextLatent,
+        linear_velocity: torch.Tensor,
+        angular_velocity: torch.Tensor,
+    ) -> SE3MotionLatent:
+        """Replace only the canonical twist and its prescribed tangents.
+
+        Amplitude rates, physical scalars, and artifacts remain interval-specific.
+        """
+        linear_velocity = linear_velocity.unsqueeze(1).expand_as(sector.linear_velocity)
+        angular_velocity = angular_velocity.unsqueeze(1).expand_as(sector.angular_velocity)
+
+        translation_direction = F.normalize(
+            context.translation_carrier - context.position.unsqueeze(-2),
+            dim=-1, eps=1.0e-6,
+        )
+        rotation_direction = F.normalize(
+            context.rotation_carrier,
+            dim=-1, eps=1.0e-6,
+        )
+        translation_tangent = (
+            linear_velocity.unsqueeze(-2)
+            + sector.translation_amplitude_rates.unsqueeze(-1) * translation_direction
+            if context.mask.translation
+            else torch.zeros_like(sector.translation_carrier_tangents)
+        )
+        rotation_tangent = (
+            torch.cross(
+                angular_velocity.unsqueeze(-2).expand_as(context.rotation_carrier),
+                context.rotation_carrier,
+                dim=-1,
+            )
+            + sector.rotation_amplitude_rates.unsqueeze(-1) * rotation_direction
+            if context.mask.rotation
+            else torch.zeros_like(sector.rotation_carrier_tangents)
+        )
+        packed = pack_motion(
+            linear_velocity,
+            angular_velocity,
+            sector.translation_amplitude_rates,
+            sector.rotation_amplitude_rates,
+            translation_tangent,
+            rotation_tangent,
+            sector.physical_scalars,
+            sector.artifacts,
+        )
+        return replace(
+            sector,
+            linear_velocity=linear_velocity,
+            angular_velocity=angular_velocity,
+            translation_carrier_tangents=translation_tangent,
+            rotation_carrier_tangents=rotation_tangent,
+            packed=packed,
+        )
 
 
     @staticmethod
@@ -272,6 +351,38 @@ class StructuredSE3StateEstimator(nn.Module):
 
         forward = self.motion_head(forward_features, context_forward)
         backward = self.motion_head(backward_features, context_backward)
+
+        if self.context_twist is not None:
+            # Infer one unified twist from all interval evidence. Only the twist and its prescribed carrier tangents are shared across the window.
+            forward_context_twist = self.context_twist(forward_features)
+            backward_context_twist = self.context_twist(backward_features)
+            forward = self._replace_motion_twist(
+                forward,
+                context_forward,
+                forward_context_twist.linear_velocity,
+                forward_context_twist.angular_velocity,
+            )
+            backward = self._replace_motion_twist(
+                backward,
+                context_backward,
+                backward_context_twist.linear_velocity,
+                backward_context_twist.angular_velocity,
+            )
+            forward_attention = forward_context_twist.attention
+            backward_attention = backward_context_twist.attention
+            context_linear_velocity = forward_context_twist.linear_velocity
+            context_angular_velocity = forward_context_twist.angular_velocity
+
+        else:
+            interval_count = forward_features.shape[1]
+            forward_attention = forward_features.new_full(
+                forward_features.shape[:2], 1.0 / interval_count
+            )
+            backward_attention = backward_features.new_full(
+                backward_features.shape[:2], 1.0 / interval_count
+            )
+            context_linear_velocity = forward.linear_velocity.mean(dim=1)
+            context_angular_velocity = forward.angular_velocity.mean(dim=1)
 
         if self.artifact_mode == "physics_residual_adversarial":
             (forward_artifacts, physical_rate_forward, residual_forward, reconstruction_forward) = self._residual_artifacts(
@@ -378,6 +489,10 @@ class StructuredSE3StateEstimator(nn.Module):
             artifact_residual_target_backward=residual_backward,
             artifact_residual_reconstruction_forward=reconstruction_forward,
             artifact_residual_reconstruction_backward=reconstruction_backward,
+            forward_twist_attention=forward_attention,
+            backward_twist_attention=backward_attention,
+            context_linear_velocity=context_linear_velocity,
+            context_angular_velocity=context_angular_velocity,
         )
         return SE3Prediction(
             position=context.position, 

@@ -19,8 +19,8 @@ model:
   weight_decay: 0.05
   configuration_weight: 2.0
   twist_weight: 2.0
-  context_twist_weight: 1.0
-  interval_twist_variance_weight: 0.1
+  contextual_twist_hidden_dim: 128
+  twist_inference: contextual
   orientation_scale_deg: 5.0
   diagnostic_gradient_interval: 100
   latent_prediction_weight: 0.1

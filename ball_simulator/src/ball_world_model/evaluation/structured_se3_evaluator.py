@@ -1,7 +1,6 @@
 """Intrinsic SE(3) evaluation shared by all task masks."""
 from __future__ import annotations
 
-import csv
 import json
 from pathlib import Path
 
@@ -14,6 +13,7 @@ from ball_world_model.models.rotation import (
     rotation_6d_to_matrix,
     rotation_geodesic_error,
 )
+from .utils import as_numpy, limited_batches, write_csv, write_json
 from .metrics import (
     apply_linear_probe,
     effective_rank,
@@ -22,20 +22,6 @@ from .metrics import (
 )
 from ball_world_model.training.kinematic_module import KinematicObservabilityModule
 
-
-def _np(value):
-    return value.detach().cpu().numpy()
-
-
-def _write_csv(path: Path, rows: list[dict]) -> None:
-    if not rows:
-        return
-    keys = list(dict.fromkeys(key for row in rows for key in row))
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=keys)
-        writer.writeheader()
-        writer.writerows(rows)
 
 def _statistics(name: str, unit: str, items: dict) -> dict[str, object]:
     x = np.concatenate(items).reshape(-1)
@@ -50,30 +36,14 @@ def _statistics(name: str, unit: str, items: dict) -> dict[str, object]:
     }
 
 
-def _limited_batches(loader, maximum_windows= int):
-    used = 0
-    for batch in loader:
-        if used >= maximum_windows:
-            break
-        batch_size = int(batch["context_rgb"].shape[0])
-        keep = min(batch_size, maximum_windows - used)
-        if keep < batch_size:
-            batch = {
-                key: value[:keep] if isinstance(value, torch.Tensor) else value[:keep]
-                for key, value in batch.items()
-            }
-        used += keep
-        yield batch
-
-
 @torch.inference_mode()
 def _collect(module, loader, device, maximum_windows: int) -> dict[str, np.ndarray]:
     buckets: dict[str, list[np.ndarray]] = {}
 
     def add(name: str, value: torch.Tensor) -> None:
-        buckets.setdefault(name, []).append(_np(value).reshape(-1, value.shape[-1]))
+        buckets.setdefault(name, []).append(as_numpy(value).reshape(-1, value.shape[-1]))
 
-    for batch in _limited_batches(loader, maximum_windows):
+    for batch in limited_batches(loader, maximum_windows):
         rgb = batch["context_rgb"].to(device)
         time = batch["context_time"].to(device)
         prediction = module.model(rgb, time)
@@ -303,9 +273,9 @@ def evaluate_structured_se3_sectors(
             }
         )
 
-    _write_csv(output / "canonical_state_metrics.csv", direct_rows)
-    _write_csv(output / "sector_probes.csv", probe_rows)
-    _write_csv(output / "sector_statistics.csv", statistics_rows)
+    write_csv(output / "canonical_state_metrics.csv", direct_rows)
+    write_csv(output / "sector_probes.csv", probe_rows)
+    write_csv(output / "sector_statistics.csv", statistics_rows)
 
     report = {
         "task": module.hparams.task,
@@ -375,12 +345,11 @@ def evaluate_structured_se3(
             _statistics("angular_inverse", "radian_per_second", inv_omega)
         ]
 
-    _write_csv(output / 'group_validity_and_consistency.csv', rows)
+    write_csv(output / 'group_validity_and_consistency.csv', rows)
 
     report = {
         "task": module.hparams.task,
         "metrics": rows,
     }
-    output.mkdir(parents=True, exist_ok=True)
-    (output / "summary.json").write_text(json.dumps(report, indent=2))
+    write_json(output / "summary.json", report)
     return report

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import json
 import shutil
 from pathlib import Path
@@ -12,44 +11,9 @@ from scipy.spatial.transform import Rotation
 import torch
 
 from ball_world_model.models.rotation import quaternion_xyzw_to_matrix
+from .utils import as_numpy, limited_batches, write_csv
 from .metrics import apply_linear_probe, effective_rank, fit_linear_probe, regression_metrics
 from .model_loader import denormalised_prediction
-
-
-def _numpy(value):
-    return value.detach().cpu().numpy()
-
-
-def _batches(loader, maximum):
-    consumed = 0
-    for batch in loader:
-        if consumed >= maximum:
-            return
-        size = batch["context_rgb"].shape[0]
-        keep = min(size, maximum - consumed)
-        if keep < size:
-            batch = {
-                key: value[:keep] if isinstance(value, (torch.Tensor, list, tuple)) else value
-                for key, value in batch.items()
-            }
-        consumed += keep
-        yield batch
-
-
-def _write_csv(path, rows):
-    if not rows:
-        return
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fieldnames: list[str] = []
-    for row in rows:
-        for key in row:
-            if key not in fieldnames:
-                fieldnames.append(key)
-
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="raise")
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def _orientation_error(target, predicted):
@@ -71,12 +35,12 @@ def _six_to_matrix(value):
 @torch.inference_mode()
 def _collect(module, loader, device, maximum):
     records = []
-    for batch in _batches(loader, maximum):
+    for batch in limited_batches(loader, maximum):
         images = batch["context_rgb"].to(device)
         time = batch["context_time"].to(device)
         prediction = module.model(images, time)
         decoded = denormalised_prediction(module, prediction)
-        target_rotation = _numpy(
+        target_rotation = as_numpy(
             quaternion_xyzw_to_matrix(batch["context_quaternion_xyzw"].to(device))
         )
         for index in range(len(images)):
@@ -84,11 +48,11 @@ def _collect(module, loader, device, maximum):
                 {
                     "trajectory_id": batch["trajectory_id"][index],
                     "start_frame": int(batch["start_frame"][index]),
-                    "time": _numpy(time[index]),
+                    "time": as_numpy(time[index]),
                     "target_rotation": target_rotation[index],
-                    "predicted_rotation": _numpy(decoded["rotation_matrix"][index]),
-                    "target_omega": _numpy(batch["context_angular_velocity"][index]),
-                    "predicted_omega": _numpy(decoded["angular_velocity"][index]),
+                    "predicted_rotation": as_numpy(decoded["rotation_matrix"][index]),
+                    "target_omega": as_numpy(batch["context_angular_velocity"][index]),
+                    "predicted_omega": as_numpy(decoded["angular_velocity"][index]),
                 }
             )
     return records
@@ -178,7 +142,7 @@ def _aggregate(records, output):
                     "value": metric_value,
                 })
 
-    _write_csv(output / "aggregate_metrics.csv", rows)
+    write_csv(output / "aggregate_metrics.csv", rows)
     return {"orientation": orientation, "angular_velocity": omega_summary}
 
 def _trajectory_reports(records, output, count, seed):
@@ -211,7 +175,7 @@ def _interventions(module, loader, device, maximum, seed):
     generator = torch.Generator().manual_seed(seed)
     estimates = {name: [] for name in ("forward", "reversed", "repeated_last", "shuffled")}
     motions = {name: [] for name in estimates}
-    for batch in _batches(loader, maximum):
+    for batch in limited_batches(loader, maximum):
         images = batch["context_rgb"]
         time = batch["context_time"] - batch["context_time"][:, :1]
         permutation = torch.randperm(images.shape[1], generator=generator)
@@ -224,8 +188,8 @@ def _interventions(module, loader, device, maximum, seed):
         for name, variant in variants.items():
             prediction = module.model(variant.to(device), time.to(device))
             decoded = denormalised_prediction(module, prediction)
-            estimates[name].append(_numpy(decoded["angular_velocity"][:, :-1]))
-            motions[name].append(_numpy(prediction.motion.forward_motion))
+            estimates[name].append(as_numpy(decoded["angular_velocity"][:, :-1]))
+            motions[name].append(as_numpy(prediction.motion.forward_motion))
     values = {name: np.concatenate(items).reshape(-1, 3) for name, items in estimates.items()}
     latents = {name: np.concatenate(items).reshape(-1, items[0].shape[-1]) for name, items in motions.items()}
     forward, forward_latent = values["forward"], latents["forward"]
@@ -250,21 +214,21 @@ def _representations(module, loader, device, maximum):
         "predicted_next_last",
     )}
     orientation, omega = [], []
-    for batch in _batches(loader, maximum):
+    for batch in limited_batches(loader, maximum):
         prediction = module.model(
             batch["context_rgb"].to(device), batch["context_time"].to(device)
         )
         content, maps, motion = prediction.frame_latent, prediction.feature_maps, prediction.motion
-        features["content_last"].append(_numpy(content[:, -1]))
-        features["content_difference"].append(_numpy(content[:, -1] - content[:, 0]))
-        features["spatial_map_last_mean"].append(_numpy(maps[:, -1].mean(dim=(-1, -2))))
-        features["spatial_feature_rate_mean"].append(_numpy(motion.normalised_forward_difference.mean(dim=(1, 3, 4))))
-        features["motion_forward_mean"].append(_numpy(motion.forward_motion.mean(dim=1)))
-        features["motion_backward_mean"].append(_numpy(motion.backward_motion.mean(dim=1)))
-        features["predicted_next_last"].append(_numpy(motion.predicted_next_embedding[:, -1]))
+        features["content_last"].append(as_numpy(content[:, -1]))
+        features["content_difference"].append(as_numpy(content[:, -1] - content[:, 0]))
+        features["spatial_map_last_mean"].append(as_numpy(maps[:, -1].mean(dim=(-1, -2))))
+        features["spatial_feature_rate_mean"].append(as_numpy(motion.normalised_forward_difference.mean(dim=(1, 3, 4))))
+        features["motion_forward_mean"].append(as_numpy(motion.forward_motion.mean(dim=1)))
+        features["motion_backward_mean"].append(as_numpy(motion.backward_motion.mean(dim=1)))
+        features["predicted_next_last"].append(as_numpy(motion.predicted_next_embedding[:, -1]))
         matrix = quaternion_xyzw_to_matrix(batch["context_quaternion_xyzw"][:, -1])
-        orientation.append(_matrix_to_6d(_numpy(matrix)))
-        omega.append(_numpy(batch["context_angular_velocity"][:, -1]))
+        orientation.append(_matrix_to_6d(as_numpy(matrix)))
+        omega.append(as_numpy(batch["context_angular_velocity"][:, -1]))
     joined = {name: np.concatenate(value) for name, value in features.items()}
     targets = {"orientation": np.concatenate(orientation), "angular_velocity": np.concatenate(omega)}
     statistics = [
@@ -308,8 +272,8 @@ def _probes(module, train_loader, test_loader, device, train_maximum, test_maxim
                 "rmse_x": metrics[0]["rmse"], "rmse_y": metrics[1]["rmse"], "rmse_z": metrics[2]["rmse"],
             }
         )
-    _write_csv(output / "layerwise_linear_probes.csv", rows)
-    _write_csv(output / "representation_statistics.csv", statistics)
+    write_csv(output / "layerwise_linear_probes.csv", rows)
+    write_csv(output / "representation_statistics.csv", statistics)
     return rows, statistics
 
 
@@ -324,7 +288,7 @@ def evaluate_loaded_rotation_observer(
     aggregate = _aggregate(records, output)
     _trajectory_reports(records, output / "trajectories", settings.trajectory_plots, settings.seed)
     intervention_rows = _interventions(module, test_loader, device, settings.maximum_test_windows, settings.seed)
-    _write_csv(output / "interventions.csv", intervention_rows)
+    write_csv(output / "interventions.csv", intervention_rows)
 
     probes, statistics = _probes(
         module, train_loader, test_loader, device,

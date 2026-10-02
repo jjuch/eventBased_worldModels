@@ -65,8 +65,8 @@ _ALLOWED_HYPERPARAMETERS = {
     # Balanced unified SE(3) objective.
     "configuration_weight",
     "twist_weight",
-    "context_twist_weight",
-    "interval_twist_variance_weight",
+    "contextual_twist_hidden_dim",
+    "twist_inference",
     "orientation_scale_deg",
 
     # Camera-relative diagnostics.

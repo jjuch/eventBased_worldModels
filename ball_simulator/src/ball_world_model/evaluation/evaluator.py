@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import csv
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -15,6 +14,7 @@ from ball_world_model.models.rotation import (
     quaternion_xyzw_to_matrix,
     rotation_geodesic_error,
 )
+from .utils import as_numpy, limited_batches, write_csv, write_json
 from .metrics import (
     apply_linear_probe,
     fit_linear_probe,
@@ -24,8 +24,6 @@ from .metrics import (
 from .model_loader import denormalised_prediction, load_kinematic_module
 from .rotation_evaluator import evaluate_loaded_rotation_observer
 from .structured_se3_evaluator import evaluate_structured_se3, evaluate_structured_se3_sectors
-from .posthoc_velocity_evaluator import evaluate_posthoc_velocity_decoders
-from .context_twist_evaluator import evaluate_context_twist
 from .artifact_disentanglement_evaluator import evaluate_artifact_disentanglement
 from .plots import component_scatter, error_vs_speed, probe_plot, trajectory_plot
 
@@ -36,12 +34,6 @@ class EvaluationSettings:
     maximum_probe_train_windows: int = 5_000
     trajectory_plots: int = 12
     seed: int = 20260824
-    posthoc_velocity_epochs: int = 40
-    posthoc_velocity_hidden_dim: int = 128
-    posthoc_velocity_batch_size: int = 2_048
-    posthoc_velocity_learning_rate: float = 1.0e-3
-
-
 
 def _configuration(training_config_path: Path):
     training_config = yaml.safe_load(training_config_path.read_text(encoding="utf-8"))
@@ -50,41 +42,10 @@ def _configuration(training_config_path: Path):
     return training_config, data_config, manifest
 
 
-def _limit_loader(loader, maximum: int):
-    consumed = 0
-    for batch in loader:
-        if consumed >= maximum:
-            break
-        batch_size = batch["context_rgb"].shape[0]
-        if consumed + batch_size > maximum:
-            keep = maximum - consumed
-            batch = {
-                key: value[:keep] if isinstance(value, torch.Tensor) else value[:keep]
-                for key, value in batch.items()
-            }
-            batch_size = keep
-        consumed += batch_size
-        yield batch
-
-
-def _csv(path: Path, rows: list[dict[str, object]]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not rows:
-        return
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-
-
-def _numpy(tensor: torch.Tensor) -> np.ndarray:
-    return tensor.detach().cpu().numpy()
-
-
 @torch.inference_mode()
 def collect_predictions(module, loader, device, maximum_windows: int):
     records = []
-    for batch in _limit_loader(loader, maximum_windows):
+    for batch in limited_batches(loader, maximum_windows):
         images = batch["context_rgb"].to(device)
         time = batch["context_time"].to(device)
         prediction = module.model(images, time)
@@ -94,12 +55,12 @@ def collect_predictions(module, loader, device, maximum_windows: int):
                 {
                     "trajectory_id": batch["trajectory_id"][index],
                     "start_frame": int(batch["start_frame"][index]),
-                    "time": _numpy(time[index]),
-                    "target_position": _numpy(batch["context_position"][index]),
-                    "target_velocity": _numpy(batch["context_linear_velocity"][index]),
-                    "target_quaternion": _numpy(batch["context_quaternion_xyzw"][index]),
-                    "predicted_position": _numpy(decoded["position"][index]),
-                    "predicted_velocity": _numpy(decoded["linear_velocity"][index])
+                    "time": as_numpy(time[index]),
+                    "target_position": as_numpy(batch["context_position"][index]),
+                    "target_velocity": as_numpy(batch["context_linear_velocity"][index]),
+                    "target_quaternion": as_numpy(batch["context_quaternion_xyzw"][index]),
+                    "predicted_position": as_numpy(decoded["position"][index]),
+                    "predicted_velocity": as_numpy(decoded["linear_velocity"][index])
                 }
             )
     return records
@@ -129,7 +90,7 @@ def aggregate_report(records: list[dict], output: Path) -> dict:
             components[label] = metrics
             rows.append({"quantity": quantity, "component": label, **metrics})
         summary[quantity] = components
-    _csv(output / "aggregate_metrics.csv", rows)
+    write_csv(output / "aggregate_metrics.csv", rows)
     error_vs_speed(records, output / "error_vs_speed.png")
     return summary
 
@@ -184,7 +145,7 @@ def intervention_report(module, loader, device, maximum_windows: int, seed: int)
         "shuffled": [],
     }
     motion_latents: dict[str, list[np.ndarray]] = {name: [] for name in accumulators}
-    for batch in _limit_loader(loader, maximum_windows):
+    for batch in limited_batches(loader, maximum_windows):
         images = batch["context_rgb"]
         relative_time = batch["context_time"] - batch["context_time"][:, :1]
         permutation = torch.randperm(images.shape[1], generator=rng)
@@ -199,8 +160,8 @@ def intervention_report(module, loader, device, maximum_windows: int, seed: int)
             decoded = denormalised_prediction(module, prediction)
             if "linear_velocity" in decoded:
                 # Mean over time is robust to the changed endpoint in reversed sequences.
-                accumulators[name].append(_numpy(decoded["linear_velocity"][:, :-1]))
-            motion_latents[name].append(_numpy(prediction.motion.forward_motion))
+                accumulators[name].append(as_numpy(decoded["linear_velocity"][:, :-1]))
+            motion_latents[name].append(as_numpy(prediction.motion.forward_motion))
 
     values = {name: np.concatenate(items).reshape(-1, 3) for name, items in accumulators.items()}
     latents = {
@@ -242,7 +203,7 @@ def extract_representations(module, loader, device, maximum_windows: int):
     targets = {"position": [], "velocity": []}
     diagnostics = {"representation": [], "mean_std": [], "effective_rank": []}
 
-    for batch in _limit_loader(loader, maximum_windows):
+    for batch in limited_batches(loader, maximum_windows):
         images = batch["context_rgb"].to(device)
         time = batch["context_time"].to(device)
         prediction = module.model(images, time)
@@ -250,9 +211,9 @@ def extract_representations(module, loader, device, maximum_windows: int):
         content = prediction.frame_latent
         motion = prediction.motion
 
-        features["content_last"].append(_numpy(content[:, -1]))
-        features["content_difference"].append(_numpy(content[:, -1] - content[:, 0]))
-        features["spatial_map_last_mean"].append(_numpy(maps[:, -1].mean(dim=(-1, -2))))
+        features["content_last"].append(as_numpy(content[:, -1]))
+        features["content_difference"].append(as_numpy(content[:, -1] - content[:, 0]))
+        features["spatial_map_last_mean"].append(as_numpy(maps[:, -1].mean(dim=(-1, -2))))
         normalised_difference = getattr(
             motion,
             "normalised_forward_difference",
@@ -264,13 +225,13 @@ def extract_representations(module, loader, device, maximum_windows: int):
                 "nor normalised_forward_difference."
             )
         features["spatial_feature_rate_mean"].append(
-            _numpy(normalised_difference.mean(dim=(1, 3, 4)))
+            as_numpy(normalised_difference.mean(dim=(1, 3, 4)))
         )
-        features["motion_forward_mean"].append(_numpy(motion.forward_motion.mean(dim=1)))
-        features["motion_backward_mean"].append(_numpy(motion.backward_motion.mean(dim=1)))
-        features["predicted_next_last"].append(_numpy(motion.predicted_next_embedding[:, -1]))
-        targets["position"].append(_numpy(batch["context_position"][:, -1]))
-        targets["velocity"].append(_numpy(batch["context_linear_velocity"][:, -1]))
+        features["motion_forward_mean"].append(as_numpy(motion.forward_motion.mean(dim=1)))
+        features["motion_backward_mean"].append(as_numpy(motion.backward_motion.mean(dim=1)))
+        features["predicted_next_last"].append(as_numpy(motion.predicted_next_embedding[:, -1]))
+        targets["position"].append(as_numpy(batch["context_position"][:, -1]))
+        targets["velocity"].append(as_numpy(batch["context_linear_velocity"][:, -1]))
 
     joined = {name: np.concatenate(values) for name, values in features.items()}
     joined_targets = {name: np.concatenate(values) for name, values in targets.items()}
@@ -304,7 +265,7 @@ def probe_report(module, train_loader, test_loader, device, train_maximum: int, 
             row["r2_mean"] = float(np.nanmean(r2_values))
             row["rmse_mean"] = float(np.mean(rmse_values))
             rows.append(row)
-    _csv(output / "layerwise_linear_probes.csv", rows)
+    write_csv(output / "layerwise_linear_probes.csv", rows)
 
     activation_rows = [
         {
@@ -316,7 +277,7 @@ def probe_report(module, train_loader, test_loader, device, train_maximum: int, 
             diagnostics["representation"], diagnostics["mean_std"], diagnostics["effective_rank"]
         )
     ]
-    _csv(output / "representation_statistics.csv", activation_rows)
+    write_csv(output / "representation_statistics.csv", activation_rows)
     probe_plot(rows, output / "layerwise_linear_probes.png")
     return rows, activation_rows
 
@@ -355,39 +316,12 @@ def _run_structured_extensions(
         test_maximum=settings.maximum_test_windows,
     )
 
-    context_twist_report = evaluate_context_twist(
-        module,
-        test_loader,
-        device,
-        output,
-        settings.maximum_test_windows,
-    )
-
-
     reports : dict[str, object] = {
         "structured_se3": structured_report,
         "sector_analysis": structured_sectors_report,
-        "context_twist": context_twist_report,
     }
 
     mask = module.model.context_head.mask
-    if mask.translation:
-        posthoc_velocity_decoder = evaluate_posthoc_velocity_decoders(
-            module,
-            train_loader,
-            test_loader,
-            device,
-            output,
-            train_maximum=settings.maximum_probe_train_windows,
-            test_maximum=settings.maximum_test_windows,
-            epochs=settings.posthoc_velocity_epochs,
-            hidden_dim=settings.posthoc_velocity_hidden_dim,
-            batch_size=settings.posthoc_velocity_batch_size,
-            learning_rate=settings.posthoc_velocity_learning_rate,
-            seed=settings.seed,
-        )
-        reports["posthoc_velocity"] = posthoc_velocity_decoder
-
     if mask.rotation:
         reports["artifact_disentanglement"] = (
             evaluate_artifact_disentanglement(
@@ -441,7 +375,7 @@ def _evaluate_translation_observer(
         settings.maximum_test_windows,
         settings.seed,
     )
-    _csv(output / "interventions.csv", interventions)
+    write_csv(output / "interventions.csv", interventions)
     probes, representation_statistics = probe_report(
         module,
         train_loader,
@@ -584,5 +518,5 @@ def evaluate_kinematic_observer(
             settings=settings,
         )
     )
-    (output / "summary.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    write_json(output / "summary.json", report)
     return output.resolve()
