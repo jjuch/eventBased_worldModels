@@ -306,7 +306,16 @@ class StructuredSE3StateEstimator(nn.Module):
         physical_rate = self.physical_feature_rate_predictor(maps, condition)
         residual_target = observed_rate - physical_rate.detach()
         artifacts = self.artifact_residual_encoder(residual_target)
-        reconstruction = self.artifact_residual_decoder(artifacts)
+        reconstruction = self.artifact_residual_decoder(
+            artifacts,
+            output_size = (residual_target.shape[-2], residual_target.shape[-1])
+        )
+        if (reconstruction.shape != residual_target.shape):
+            raise RuntimeError(
+                "Artifact residual reconstruction has an invalid shape. "
+                f"Expected {tuple(residual_target.shape)}, "
+                f"received {tuple(reconstruction.shape)}."
+            )
         return artifacts, physical_rate, residual_target, reconstruction
 
 

@@ -91,6 +91,7 @@ class ArtifactResidualDecoder(nn.Module):
         self.channels, self.spatial_size = channels, spatial_size
         self.initial_size = spatial_size // 4
         self.linear = nn.Linear(artifact_dim, hidden_channels * self.initial_size**2)
+        self.hidden_channels = hidden_channels
         self.decoder = nn.Sequential(
             nn.ConvTranspose2d(hidden_channels, hidden_channels, 4, stride=2, padding=1),
             nn.GroupNorm(8, hidden_channels),
@@ -102,12 +103,56 @@ class ArtifactResidualDecoder(nn.Module):
         )
 
 
-    def forward(self, artifact: torch.Tensor) -> torch.Tensor:
-        b, t = artifact.shape[:2]
-        value = self.linear(artifact.flatten(0, 1))
-        value = value.reshape(b * t, -1, self.initial_size, self.initial_size)
-        value = self.decoder(value)
-        return value.reshape(b, t, self.channels, self.spatial_size, self.spatial_size)
+    def forward(self, artifacts: torch.Tensor, *, output_size: tuple[int, int] | None = None) -> torch.Tensor:
+        """
+        Decode artifact vectors into spatial residual feature maps.
+        
+        The decoder operates internally at its canonical spatial size.
+        The decoded maps are resized afterward to match the feature-map
+        resolution used by the frame encoder.
+        
+        Expected input:
+        [batch, intervals, artifact_dim]
+        
+        Returned output:
+        [batch, intervals, output_channels, height, width]
+        """
+        leading_shape = artifacts.shape[:-1]
+
+        # Flatten only batch-like dimensions. For the normal training input, this changes [B, T, D] into [B*T, D].
+        flattened = artifacts.reshape(-1, artifacts.shape[-1])
+
+        decoded = self.linear(flattened)
+        decoded = decoded.reshape(
+            flattened.shape[0],
+            self.hidden_channels,
+            self.initial_size,
+            self.initial_size
+        )
+        decoded = self.decoder(decoded)
+
+        if output_size is not None:
+            requested_size = (int(output_size[0]), int(output_size[1]))
+
+            if decoded.shape[-2:] != requested_size:
+                decoded = F.interpolate(
+                    decoded,
+                    size=requested_size,
+                    mode="bilinear",
+                    align_corners=False,
+                )
+
+        # Read the dimensions from the tensor after interpolation.
+        output_channels = decoded.shape[-3]
+        output_height = decoded.shape[-2]
+        output_width = decoded.shape[-1]
+
+        return decoded.reshape(
+            *leading_shape,
+            output_channels,
+            output_height,
+            output_width,
+        )
 
 
 class PhysicsAdversary(nn.Module):

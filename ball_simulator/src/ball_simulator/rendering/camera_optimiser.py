@@ -122,7 +122,7 @@ def optimise_camera(
     *,
     minimum_diameter_px: float = 35.0,
     target_diameter_px: float = 70.0,
-    image_margin_fraction: float = 0.06,
+    image_margin_fraction: float = 0.005,
 ) -> CameraCandidate:
     positions, radii = load_position_cloud(dataset)
     lower = positions.min(axis=0)
