@@ -1,4 +1,4 @@
-"""Compact loss set for physical state and coupled SE(3) carriers."""
+"""Direct physical losses with optional geometric regularisation."""
 
 from __future__ import annotations
 
@@ -36,14 +36,7 @@ def observer_losses(
     previous: CurrentTargets | None = None,
     dt: Tensor | None = None,
 ) -> tuple[Tensor, dict[str, Tensor]]:
-    target_carriers = teacher(
-        target.position, 
-        target.rotation, 
-        target.linear_velocity, 
-        target.angular_velocity,
-        target.linear_acceleration, 
-        target.angular_acceleration,
-    )
+    zero = prediction.pose.position.new_zeros(())
 
     position = scaled_mse(prediction.pose.position, target.position, scales["position"])
     orientation = so3_log(target.rotation.transpose(-1, -2) @ prediction.pose.rotation).square().sum(-1).mean()
@@ -51,15 +44,30 @@ def observer_losses(
     linear_velocity = scaled_mse(prediction.twist.linear, target.linear_velocity, scales["linear_velocity"])
     angular_velocity = scaled_mse(prediction.twist.angular, target.angular_velocity, scales["angular_velocity"])
 
-    linear_acceleration = scaled_mse(prediction.acceleration.linear, target.linear_acceleration, scales["linear_acceleration"])
-    angular_acceleration = scaled_mse(prediction.acceleration.angular, target.angular_acceleration, scales["angular_acceleration"])
+    linear_acceleration = angular_acceleration = carrier = carrier_velocity = carrier_acceleration = rollout = zero
 
-    carrier = F.mse_loss(prediction.carrier, target_carriers.carrier)
-    carrier_velocity = F.mse_loss(prediction.carrier_velocity, target_carriers.carrier_velocity)
-    carrier_acceleration = F.mse_loss(prediction.carrier_acceleration, target_carriers.carrier_acceleration)
+    if weights.acceleration > 0:
+        linear_acceleration = scaled_mse(prediction.acceleration.linear, target.linear_acceleration, scales["linear_acceleration"])
+        angular_acceleration = scaled_mse(prediction.acceleration.angular, target.angular_acceleration, scales["angular_acceleration"])
+    
+    need_teacher = weights.carrier > 0 or weights.carrier_velocity > 0 or weights.carrier_acceleration > 0
+    if need_teacher:
+        targets = teacher(
+            target.position, 
+            target.rotation, 
+            target.linear_velocity, 
+            target.angular_velocity, 
+            target.linear_acceleration, 
+            target.angular_acceleration
+        )
+        if weights.carrier > 0: 
+            carrier = F.mse_loss(prediction.carrier, targets.carrier)
+        if weights.carrier_velocity > 0: 
+            carrier_velocity = F.mse_loss(prediction.carrier_velocity, targets.carrier_velocity)
+        if weights.carrier_acceleration > 0: 
+            carrier_acceleration = F.mse_loss(prediction.carrier_acceleration, targets.carrier_acceleration)
 
-    rollout = position.new_zeros(())
-    if previous is not None and dt is not None:
+    if weights.rollout > 0 and previous is not None and dt is not None:
         p, r, v, w = propagate_world(
             previous.position, previous.rotation, previous.linear_velocity, previous.angular_velocity, dt,
             prediction.acceleration.linear, prediction.acceleration.angular,

@@ -26,23 +26,21 @@ class CausalAttentionPool(nn.Module):
         return self.output(pooled), weights
 
 class TwistEncoder(nn.Module):
-    """Uses first feature rates only; no pose shortcut is supplied."""
-    def __init__(self, feature_channels: int, hidden_dim: int) -> None:
+    def __init__(self, keypoints: int, keypoint_dim: int, hidden_dim: int) -> None:
         super().__init__()
-        self.spatial = nn.Sequential(
-            nn.Conv2d(feature_channels * 3, hidden_dim, 3, padding=1, bias=False),
-            nn.GroupNorm(min(8, hidden_dim), hidden_dim), 
+        pair_dim = keypoints * (2 * 2 + 3 * keypoint_dim + 1)
+        self.interval = nn.Sequential(
+            nn.Linear(pair_dim, hidden_dim), 
+            nn.LayerNorm(hidden_dim), 
             nn.SiLU(),
-            nn.AdaptiveAvgPool2d(1), 
-            nn.Flatten(),
         )
         self.pool = CausalAttentionPool(hidden_dim, hidden_dim, 6)
 
-    def forward(self, maps: Tensor, first_rate: Tensor) -> tuple[Tensor, Tensor]:
-        batch, intervals = first_rate.shape[:2]
-        inputs = torch.cat((maps[:, :-1], maps[:, 1:], first_rate), dim=2)
-        encoded = self.spatial(inputs.flatten(0, 1)).reshape(batch, intervals, -1)
-        return self.pool(encoded)
+    def forward(self, coordinates: Tensor, descriptors: Tensor, confidence: Tensor, dt: Tensor) -> tuple[Tensor, Tensor]:
+        dq = (coordinates[:, 1:] - coordinates[:, :-1]) / dt[..., None, None]
+        dd = (descriptors[:, 1:] - descriptors[:, :-1]) / dt[..., None, None]
+        pair = torch.cat((coordinates[:, :-1], coordinates[:, 1:], dq, descriptors[:, :-1], descriptors[:, 1:], dd, confidence[:, 1:, :, None]), dim=-1)
+        return self.pool(self.interval(pair.flatten(-2)))
 
 
 class AccelerationEncoder(nn.Module):
@@ -50,20 +48,21 @@ class AccelerationEncoder(nn.Module):
 
     Pose and decoded twist are deliberately not passed to this branch. The branch must identify change of motion from visual temporal curvature. The analytic carrier teacher introduces the required omega-dependent centripetal term.
     """
-    def __init__(self, feature_channels: int, hidden_dim: int) -> None:
+    def __init__(self, keypoints: int, keypoint_dim: int, hidden_dim: int) -> None:
         super().__init__()
-        self.spatial = nn.Sequential(
-            nn.Conv2d(feature_channels * 3, hidden_dim, 3, padding=1, bias=False),
-            nn.GroupNorm(min(8, hidden_dim), hidden_dim), 
+        sample_dim = keypoints * (2 + keypoint_dim)
+        self.sample = nn.Sequential(
+            nn.Linear(sample_dim, hidden_dim), 
+            nn.LayerNorm(hidden_dim), 
             nn.SiLU(),
-            nn.AdaptiveAvgPool2d(1), 
-            nn.Flatten(),
         )
         self.pool = CausalAttentionPool(hidden_dim, hidden_dim, 6)
         
-    def forward(self, first_rate: Tensor, second_rate: Tensor) -> tuple[Tensor, Tensor]:
-        # second_rate[t] is centred at frame t+1; adjacent first rates bracket it.
-        inputs = torch.cat((first_rate[:, :-1], first_rate[:, 1:], second_rate), dim=2)
-        batch, samples = inputs.shape[:2]
-        encoded = self.spatial(inputs.flatten(0, 1)).reshape(batch, samples, -1)
-        return self.pool(encoded)
+    def forward(self, coordinates: Tensor, descriptors: Tensor, dt: Tensor) -> tuple[Tensor, Tensor]:
+        first_q = (coordinates[:, 1:] - coordinates[:, :-1]) / dt[..., None, None]
+        first_d = (descriptors[:, 1:] - descriptors[:, :-1]) / dt[..., None, None]
+        centre_dt = 0.5 * (dt[:, 1:] + dt[:, :-1])
+        second_q = (first_q[:, 1:] - first_q[:, :-1]) / centre_dt[..., None, None]
+        second_d = (first_d[:, 1:] - first_d[:, :-1]) / centre_dt[..., None, None]
+        sample = torch.cat((second_q, second_d), dim=-1).flatten(-2)
+        return self.pool(self.sample(sample))

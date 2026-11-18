@@ -35,7 +35,7 @@ def _to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
 def _safe_r2(prediction: np.ndarray, target: np.ndarray) -> np.ndarray:
     residual = np.square(prediction - target).sum(axis=0)
     total = np.square(target - target.mean(axis=0)).sum(axis=0)
-    return np.where(total > 1.0e-12, 1.0 - residual / total, np.nan)
+    return np.array([1.0-r/t if t > 1.0e-12 else None for r,t in zip(residual,total,strict=True)], dtype=object)
 
 
 def _regression_metrics(prediction: np.ndarray, target: np.ndarray) -> dict[str, Any]:
@@ -45,6 +45,8 @@ def _regression_metrics(prediction: np.ndarray, target: np.ndarray) -> dict[str,
         "mae": np.mean(np.abs(error), axis=0).tolist(),
         "bias": np.mean(error, axis=0).tolist(),
         "r2": _safe_r2(prediction, target).tolist(),
+        "target_std": target.std(axis=0).tolist(),
+        "informative": bool(np.max(target.std(axis=0)) > 1.0e-8),
         "norm_rmse": float(np.sqrt(np.mean(np.sum(np.square(error), axis=1)))),
         "norm_mae": float(np.mean(np.linalg.norm(error, axis=1))),
         "p50_norm_error": float(np.percentile(np.linalg.norm(error, axis=1), 50)),
@@ -129,9 +131,9 @@ def _trajectory_plots(output: Path, records: dict[str, np.ndarray], count: int) 
         time = records["time"][mask][order]
         figure, axes = plt.subplots(2, 2, figsize=(13, 8), constrained_layout=True)
         for component, label in enumerate("xyz"):
-            axes[0, 0].plot(time, records["true_position"][mask][order, component], label=f"true {label}")
-            axes[0, 0].plot(time, records["pred_position"][mask][order, component], linestyle="--", label=f"pred {label}")
-            axes[0, 1].plot(time, records["true_linear_velocity"][mask][order, component])
+            axes[0, 0].plot(time, records["true_position"][mask][order, component], marker="o", label=f"true {label}")
+            axes[0, 0].plot(time, records["pred_position"][mask][order, component], linestyle="--", marker="x", label=f"pred {label}")
+            axes[0, 1].plot(time, records["true_linear_velocity"][mask][order, component], marker="o")
             axes[0, 1].plot(time, records["pred_linear_velocity"][mask][order, component], linestyle="--")
             axes[1, 0].plot(time, records["true_angular_velocity"][mask][order, component])
             axes[1, 0].plot(time, records["pred_angular_velocity"][mask][order, component], linestyle="--")
@@ -223,10 +225,8 @@ def evaluate_kinematic_observer(
     torch.manual_seed(settings.seed); np.random.seed(settings.seed)
     checkpoint_path, training_config_path, output = Path(checkpoint_path), Path(training_config_path), Path(output_directory)
     output.mkdir(parents=True, exist_ok=True)
-
     configuration = yaml.safe_load(training_config_path.read_text(encoding="utf-8"))
     data_config = DataConfig.from_yaml(Path(configuration["data_config"]))
-
     manifest = data_config.manifest_path or data_config.root / "manifest.parquet"
     dataset = RenderedTrajectoryDataset(manifest, data_config, split="test")
     loader = build_dataloader(dataset, data_config, shuffle=False)
@@ -239,7 +239,6 @@ def evaluate_kinematic_observer(
     summary["training_config"] = str(training_config_path.resolve())
     _save_json(output / "metrics.json", summary)
     _write_window_csv(output / "window_errors.csv", records)
-
     _component_scatter(output / "position_components.png", records["pred_position"], records["true_position"], "Position", "m")
     _component_scatter(output / "linear_velocity_components.png", records["pred_linear_velocity"], records["true_linear_velocity"], "Linear velocity", "m/s")
     _component_scatter(output / "angular_velocity_components.png", records["pred_angular_velocity"], records["true_angular_velocity"], "Angular velocity", "rad/s")
@@ -253,10 +252,8 @@ def evaluate_kinematic_observer(
         "Linear acceleration norm error": (np.linalg.norm(records["pred_linear_acceleration"]-records["true_linear_acceleration"], axis=1), "m/s2"),
         "Angular acceleration norm error": (np.linalg.norm(records["pred_angular_acceleration"]-records["true_angular_acceleration"], axis=1), "rad/s2"),
     })
-
     _error_vs_magnitude(output / "linear_velocity_error_vs_speed.png", np.linalg.norm(records["true_linear_velocity"], axis=1), np.linalg.norm(records["pred_linear_velocity"]-records["true_linear_velocity"], axis=1), "True speed [m/s]", "Velocity error [m/s]")
     _error_vs_magnitude(output / "angular_velocity_error_vs_speed.png", np.linalg.norm(records["true_angular_velocity"], axis=1), np.linalg.norm(records["pred_angular_velocity"]-records["true_angular_velocity"], axis=1), "True angular speed [rad/s]", "Angular-velocity error [rad/s]")
-    
     _attention_plot(output / "temporal_attention.png", records.get("twist_attention"), records.get("acceleration_attention"))
     _trajectory_plots(output / "trajectories", records, settings.trajectory_plots)
     return output

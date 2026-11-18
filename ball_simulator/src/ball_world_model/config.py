@@ -93,9 +93,12 @@ class ObserverModelConfig(StrictModel):
     feature_channels: int = Field(default=128, ge=8)
     descriptor_dim: int = Field(default=256, ge=16)
     temporal_hidden_dim: int = Field(default=128, ge=8)
+    keypoints: int = Field(default=8, ge=2)
+    keypoint_dim: int = Field(default=32, ge=4)
     carrier_points: int = Field(default=16, ge=4)
     carrier_radius: float = Field(default=0.10, gt=0.0)
     default_dt: float = Field(default=0.01, gt=0.0)
+    predict_acceleration: bool = True
 
 class ObserverLossConfig(StrictModel):
     pose: float = Field(default=1.0, ge=0.0)
