@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, model_validator, ConfigDict
 
 
 class ImageConfig(BaseModel):
@@ -83,3 +83,69 @@ class DataConfig(BaseModel):
         config = cls.model_validate(raw)
         # Paths in YAML are interpreted relative to the process working directory.
         return config
+
+
+# <--- start SE3 --->
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+class ObserverModelConfig(StrictModel):
+    feature_channels: int = Field(default=128, ge=8)
+    descriptor_dim: int = Field(default=256, ge=16)
+    temporal_hidden_dim: int = Field(default=128, ge=8)
+    carrier_points: int = Field(default=16, ge=4)
+    carrier_radius: float = Field(default=0.10, gt=0.0)
+    default_dt: float = Field(default=0.01, gt=0.0)
+
+class ObserverLossConfig(StrictModel):
+    pose: float = Field(default=1.0, ge=0.0)
+    twist: float = Field(default=1.0, ge=0.0)
+    acceleration: float = Field(default=1.0, ge=0.0)
+    carrier: float = Field(default=0.05, ge=0.0)
+    carrier_velocity: float = Field(default=0.05, ge=0.0)
+    carrier_acceleration: float = Field(default=0.05, ge=0.0)
+    rollout: float = Field(default=0.0, ge=0.0)
+
+
+class OptimiserConfig(StrictModel):
+    learning_rate: float = Field(default=3.0e-4, gt=0.0)
+    weight_decay: float = Field(default=5.0e-2, ge=0.0)
+
+
+class TrainerConfig(StrictModel):
+    output_directory: Path = Path("outputs/training")
+    epochs: int = Field(default=100, ge=1)
+    accelerator: str = "auto"
+    devices: str | int | list[int] = "auto"
+    precision: str | int = "bf16-mixed"
+    gradient_clip_norm: float = Field(default=1.0, ge=0.0)
+    deterministic: bool = True
+    log_every_n_steps: int = Field(default=10, ge=1)
+    num_sanity_val_steps: int = Field(default=2, ge=0)
+
+
+class CheckpointConfig(StrictModel):
+    monitor: str = "validation/loss"
+    mode: Literal["min", "max"] = "min"
+    save_top_k: int = Field(default=1, ge=-1)
+    save_last: bool = True
+
+
+class TensorBoardConfig(StrictModel):
+    name: str = "tensorboard"
+    version: str | int | None = None
+
+
+class KinematicTrainingConfig(StrictModel):
+    data_config: Path
+    model: ObserverModelConfig = ObserverModelConfig()
+    loss: ObserverLossConfig = ObserverLossConfig()
+    optimiser: OptimiserConfig = OptimiserConfig()
+    training: TrainerConfig = TrainerConfig()
+    checkpoint: CheckpointConfig = CheckpointConfig()
+    tensorboard: TensorBoardConfig = TensorBoardConfig()
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "KinematicTrainingConfig":
+        path = Path(path)
+        return cls.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))

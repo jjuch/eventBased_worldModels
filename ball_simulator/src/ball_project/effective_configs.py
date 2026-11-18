@@ -65,16 +65,6 @@ def effective_training_config(context: ProjectContext) -> Path:
     value.setdefault("training", {})["output_directory"] = str(
         context.resolve(context.manifest.paths.training_outputs)
     )
-
-    # Inject the camera selected after trajectory generation and camera
-    # optimisation. Keeping this in the generated effective config makes the
-    # checkpoint self-describing and guarantees that camera-frame diagnostics
-    # use the same view as the rendered dataset.
-    location, target = _active_camera(context)
-    model = value.setdefault("model", {})
-    model["camera_location"] = location
-    model["camera_target"] = target
-
     return _write(context.root / ".ball_project/effective/training.yaml", value)
 
 def effective_render_config(context: ProjectContext) -> Path:

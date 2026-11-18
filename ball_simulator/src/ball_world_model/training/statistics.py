@@ -16,8 +16,11 @@ class StateStatistics:
 @torch.no_grad()
 def compute_statistics(loader) -> StateStatistics:
     values = {name: [] for name in (
-        "position", "linear_velocity", "angular_velocity",
-        "linear_acceleration", "angular_acceleration",
+        "position", 
+        "linear_velocity", 
+        "angular_velocity",
+        "linear_acceleration",
+        "angular_acceleration",
     )}
 
     for batch in loader:
