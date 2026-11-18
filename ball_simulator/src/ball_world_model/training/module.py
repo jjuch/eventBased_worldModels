@@ -45,15 +45,32 @@ class SE3ObserverModule(L.LightningModule):
             self.log(f"{stage}/{name}", value, on_epoch=True, batch_size=len(batch["context_rgb"]))
         return total
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch: dict[str, torch.Tensor], batch_index: int) -> None:
+        del batch_index
         return self._step(batch, "train")
     
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_index: int) -> None:
+        del batch_index
         self._step(batch, "validation")
 
+    def test_step(self, batch: dict[str, torch.Tensor], batch_index: int) -> None:
+        del batch_index
+        self._step(batch, "test")
+
     def configure_optimizers(self):
-        return torch.optim.AdamW(
-            self.parameters(), 
-            lr=self.learning_rate, 
-            weight_decay=self.weight_decay
+        optimiser = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.hparams.learning_rate,
+            weight_decay=self.hparams.weight_decay
         )
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+            optimiser,
+            T_max=max(1, self.trainer.max_epochs),
+        )
+        return {
+            "optimizer": optimiser,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "epoch",
+            }
+        }
