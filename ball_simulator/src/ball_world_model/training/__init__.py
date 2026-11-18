@@ -1,8 +1,8 @@
-from .kinematic_module import KinematicObservabilityModule, KinematicStatistics
-from .train_kinematic import train_kinematic
+from .module import SE3ObserverModule
+from .statistics import StateStatistics, compute_statistics
 
 __all__ = [
-    "KinematicObservabilityModule",
-    "KinematicStatistics",
-    "train_kinematic",
+    "SE3ObserverModule", 
+    "StateStatistics", 
+    "compute_statistics",
 ]
