@@ -59,7 +59,10 @@ class SpatialFeatures:
     frame_descriptor: Tensor  # [B, T, E]
 
 class SpatialKeypointEncoder(nn.Module):
-    """Soft keypoints retain position and marker geometry without legacy sectors."""
+    """Soft keypoints retain the object and marker positions that global pooling loses.
+
+    The read-out always runs in float32: keypoint coordinates are soft-argmax expectations whose frame-to-frame changes are smaller than bfloat16 resolution.
+    """
     def __init__(self, feature_channels: int, keypoints: int = 8, keypoint_dim: int = 32, descriptor_dim: int = 256) -> None:
         super().__init__()
         self.keypoints = keypoints
@@ -75,6 +78,11 @@ class SpatialKeypointEncoder(nn.Module):
         )
 
     def forward(self, maps: Tensor) -> SpatialFeatures:
+        with torch.autocast(device_type=maps.device.type, enabled=False):
+            return self._read_out(maps.float())
+
+
+    def _read_out(self, maps: Tensor) -> SpatialFeatures:
         batch, time, channels, height, width = maps.shape
         flat = maps.flatten(0, 1)
         logits = self.attention(flat).flatten(-2)

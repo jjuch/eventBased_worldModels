@@ -7,8 +7,7 @@ Conventions
 * ``v = p_dot`` and ``omega`` are expressed in the world frame.
 * ``a = v_dot`` and ``alpha = omega_dot`` are expressed in the world frame.
 
-The affine carrier is X_k = p + R b_k. Its derivatives couple translation and
-rotation and are the teacher's structured high-dimensional representation.
+The affine carrier is X_k = p + R b_k. Its derivatives couple translation and rotation; they are kept as geometry utilities for the contact stage.
 """
 from __future__ import annotations
 
@@ -135,3 +134,43 @@ def propagate_world(
     next_rotation = rotation_increment @ rotation
     next_angular = angular + dt * alpha
     return next_position, next_rotation, next_linear, next_angular
+
+
+def rollout_world(
+    position: Tensor,
+    rotation: Tensor,
+    linear: Tensor,
+    angular: Tensor,
+    linear_acceleration: Tensor,
+    angular_acceleration: Tensor,
+    horizons: Tensor,
+) -> tuple[Tensor, Tensor]:
+    """
+    Propagate a state [B, ...] to every horizon [B, F] (s after the state's time).
+    
+    Steps between consecutive horizons with ``propagate_world``, keeping the acceleration constant. Returns positions [B, F, 3] and rotations [B, F, 3, 3].
+    """
+    positions, rotations = [], []
+    elapsed = torch.zeros_like(horizons[:, 0])
+    for step in range(horizons.shape[1]):
+        dt = horizons[:, step] - elapsed
+        position, rotation, linear, angular = propagate_world(
+            position, rotation, linear, angular, dt, linear_acceleration, angular_acceleration,
+        )
+        positions.append(position)
+        rotations.append(rotation)
+        elapsed = horizons[:, step]
+    return torch.stack(positions, dim=1), torch.stack(rotations, dim=1)
+
+
+def rotation_angle(first: Tensor, second: Tensor) -> Tensor:
+    """Geodesic angle in rad between two rotation matrices (for metrics)."""
+    return torch.linalg.vector_norm(so3_log(first.transpose(-1, -2) @ second), dim=-1)
+
+
+def chordal_angle_squared(first: Tensor, second: Tensor) -> Tensor:
+    """Smooth squared-angle surrogate ||R1 - R2||_F^2 / 2 = 4 sin^2(theta/2) ~ theta^2.
+
+    Used in losses instead of the geodesic angle because acos has an unbounded gradient at zero error.
+    """
+    return 0.5 * (first - second).square().sum(dim=(-2, -1))

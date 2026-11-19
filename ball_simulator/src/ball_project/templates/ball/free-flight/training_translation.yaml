@@ -2,21 +2,20 @@ data_config: generated-at-runtime.yaml
 model:
   feature_channels: 128
   descriptor_dim: 256
-  temporal_hidden_dim: 128
+  motion_dim: 128
+  temporal_layers: 2
   keypoints: 8
   keypoint_dim: 32
-  carrier_points: 16
-  carrier_radius: 0.10
   default_dt: 0.01
   predict_acceleration: true
+  standardiser_momentum: 0.01
 loss:
   pose: 1.0
   twist: 1.0
   acceleration: 1.0
-  carrier: 0.05
-  carrier_velocity: 0.05
-  carrier_acceleration: 0.05
-  rollout: 0.01
+  rollout: 0.1
+  rollout_steps: 5
+  orientation_scale_deg: 5.0
 optimiser:
   learning_rate: 0.0003
   weight_decay: 0.05
@@ -25,7 +24,7 @@ training:
   epochs: 75
   accelerator: auto
   devices: auto
-  precision: bf16-mixed
+  precision: 32-true
   gradient_clip_norm: 1.0
   deterministic: true
   log_every_n_steps: 10

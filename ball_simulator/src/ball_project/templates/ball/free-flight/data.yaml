@@ -11,7 +11,7 @@ temporal:
   rendered_fps: 100.0
   frame_stride: 1
   context_frames: 10
-  prediction_frames: 1
+  prediction_frames: 5
   target_history_frames: 4
 sampling:
   windows_per_trajectory: 10

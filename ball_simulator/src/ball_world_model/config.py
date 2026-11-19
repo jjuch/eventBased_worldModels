@@ -92,22 +92,23 @@ class StrictModel(BaseModel):
 class ObserverModelConfig(StrictModel):
     feature_channels: int = Field(default=128, ge=8)
     descriptor_dim: int = Field(default=256, ge=16)
-    temporal_hidden_dim: int = Field(default=128, ge=8)
+    motion_dim: int = Field(default=128, ge=8)
+    temporal_layes: int = Field(default=2, ge=0)
     keypoints: int = Field(default=8, ge=2)
     keypoint_dim: int = Field(default=32, ge=4)
-    carrier_points: int = Field(default=16, ge=4)
-    carrier_radius: float = Field(default=0.10, gt=0.0)
     default_dt: float = Field(default=0.01, gt=0.0)
     predict_acceleration: bool = True
+    standardiser_momentum: float = Field(default=0.01, gt=0.0, le=1.0)
+
 
 class ObserverLossConfig(StrictModel):
+    """Loss weights; see ball_world_model.training.losses for the definition of each term."""
     pose: float = Field(default=1.0, ge=0.0)
     twist: float = Field(default=1.0, ge=0.0)
     acceleration: float = Field(default=1.0, ge=0.0)
-    carrier: float = Field(default=0.05, ge=0.0)
-    carrier_velocity: float = Field(default=0.05, ge=0.0)
-    carrier_acceleration: float = Field(default=0.05, ge=0.0)
-    rollout: float = Field(default=0.0, ge=0.0)
+    rollout: float = Field(default=0.1, ge=0.0)
+    rollout_steps: int = Field(default=5, ge=1)
+    orientation_scale_deg: float = Field(default=5.0, gt=0.0)
 
 
 class OptimiserConfig(StrictModel):
@@ -120,7 +121,7 @@ class TrainerConfig(StrictModel):
     epochs: int = Field(default=100, ge=1)
     accelerator: str = "auto"
     devices: str | int | list[int] = "auto"
-    precision: str | int = "bf16-mixed"
+    precision: str | int = "32-true"
     gradient_clip_norm: float = Field(default=1.0, ge=0.0)
     deterministic: bool = True
     log_every_n_steps: int = Field(default=10, ge=1)

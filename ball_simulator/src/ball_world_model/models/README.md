@@ -1,94 +1,43 @@
-# Training loop
-The Lightning loss is now decomposed into:
-```text
-position_loss_normalised
-velocity_loss_normalised
-forward_latent_loss
-backward_latent_loss
-latent_prediction_loss
-reverse_velocity_loss
-kinematic_loss_m2
-variance_loss
-```
-The total objective is:
-```text
-position_weight * position_loss
-+ velocity_weight * velocity_loss
-+ latent_prediction_weight * latent_prediction_loss
-+ kinematic_weight * kinematic_loss
-+ reverse_weight * reverse_velocity_loss
-+ variance_weight * variance_loss
-```
-The position and velocity heads still produce normalised state values. Iterative correction is performed in physical metres and metres per second, then converted back to normalised outputs. This avoids mixing normalised states with the dimensional kinematic residual.
+# SE(3) observer
 
-## Difference normalisation
-The model computes a spatial feature rate:
-```text
-feature_rate[t] = (F[t+1] - F[t]) / dt
-```
-A running per-channel mean and variance standardise this rate across batch, time, and spatial locations. This emphasizes small but repeatable motion signals while preserving relative magnitude.
-The implementation deliberately does not normalise every individual difference to unit norm. Per-sample unit normalisation would erase the distinction between slow and fast motion. The running statistics are buffers in the checkpoint and are frozen during validation and test evaluation.
+Estimates the rigid-body state of the marked ball from a window `T` RGB frames.
 
-## Bidirectional training
-For each adjacent pair, the same motion encoder receives:
 ```text
-forward:
-  F[t], F[t+1], normalised feature rate
+frames [B,T,3,H,W]
+  └─ CoordinateAwareFrameEncoder ── feature maps F [B,T,C,h,w]
+       ├─ SpatialKeypointEncoder (float32) ── frame descriptor ── pose_head ──> pose per frame       [B,T]
+       └─ IntervalMotionEncoder: (F[k], F[k+1], standardised (F[k+1]-F[k])/dt) ──> motion per interval [B,T-1,D]
+            └─ IntervalTemporalMixer (1-D convs over intervals)
+                 ├─ twist_head        ──> mean twist per interval         [B,T-1,6]
+                 └─ acceleration_head ──> mean acceleration per interval  [B,T-1,6]
+current state at t_last = (pose[T-1], twist[last] + ½·dt·acceleration[last], acceleration[last])
 
-backward:
-  F[t+1], F[t], negative normalised feature rate
 ```
-The shared velocity decoder predicts normalised forward and backward velocities. The reversal loss enforces:
-```text
-v_backward approximately -v_forward
-```
-The shared latent transition predicts both the next and previous content embeddings. The content targets are stop-gradient values, while variance regularisation discourages content or motion collapse.
 
-## Iterative correction
-`refinement_iterations` controls repeated application of one weight-shared corrector.
-```yaml
-refinement_iterations: 0  # no correction baseline
-refinement_iterations: 1  # initial recommended run
-refinement_iterations: 2  # later ablation
-refinement_iterations: 3  # later ablation
-```
-The final corrector layer is initialised to zero. Therefore, iteration begins as an identity operation and cannot damage initial predictions before learning useful residual corrections. Do not immediately interpret `K=3` as superior. First compare `K=0` and `K=1` at equal seeds. Iteration is useful only if residuals and physical metrics improve.
+## Why interval means
 
-## TensorBoard diagnostics
-Monitor these quantities separately:
+Two frames reveal the *mean* motion between them, not the instantaneous motion at either frame.
+The mean makes one SE(3) step exact:
 ```text
-validation/position_rmse_m
-validation/velocity_rmse_mps
-validation/latent_prediction_loss
-validation/reverse_velocity_loss
-validation/kinematic_consistency_m
-validation/feature_delta_abs_mean
-validation/motion_std
+p[k+1] = p[k] + dt · v_mean            R[k+1] = exp(dt · ω_mean) R[k]
 ```
-Collapse diagnostics:
-```text
-validation/position_std_ratio_x
-validation/position_std_ratio_y
-validation/position_std_ratio_z
-validation/velocity_std_ratio_x
-validation/velocity_std_ratio_y
-validation/velocity_std_ratio_z
-```
-Interpretation:
-```text
-std ratio near 0:
-  nearly constant predictions
 
-std ratio near 1:
-  predicted variation is comparable to target variation
+The targets (`training/targets.py`) are computed from the simulator states without approximation:
+`v_mean = Δp/dt`, `ω_mean = log(R[k+1] R[k]ᵀ)/dt`, `a_mean = Δv/dt`, `α_mean = Δω/dt`. No accelerations have to be stored in the dataset.
 
-large std ratio:
-  unstable or excessively variable predictions
-```
-For iterative correction, compare:
-```text
-validation/linear_refinement_residual_0_m
-validation/linear_refinement_residual_1_m
-validation/linear_refinement_residual_2_m
-```
-Only fields corresponding to configured iterations are emitted.
+## Losses (`training/losses.py`)
+| term | definition | scale |
+|---|---|---|
+| position | per frame | training std of position |
+| orientation | per frame, chordal ≈ angle² | `orientation_scale_deg` |
+| linear / angular velocity | per interval mean | training std |
+| linear / angular acceleration | per interval mean | training std (floored at 1e-3) |
+| rollout position / orientation | current state propagated with constant acceleration to `rollout_steps` future frames | same as pose terms |
+
+Every term is dimensionless, so the weights in `training.yaml` are directly comparable.
+
+## Notes
+
+- Use `precision: 32-true`. Frame differences are smaller than bfloat16 resolution.
+- If the trajectories have no gravity, drag or Magnus effect, acceleration is identically zero. Training prints this, and the evaluator reports R² as undefined for those components.
+- Carrier points (`geometry/se3.py: carrier_state/velocity/acceleration`) are kept as tested geometry utilities for the contact stage; they are no longer trained, since they are exact functions of pose and twist.

@@ -15,9 +15,9 @@ import yaml
 
 from ball_world_model.config import DataConfig
 from ball_world_model.data.dataset import RenderedTrajectoryDataset, build_dataloader
-from ball_world_model.geometry.se3 import carrier_state, propagate_world, so3_log
+from ball_world_model.geometry.se3 import propagate_world, rotation_angle
 from ball_world_model.training.module import SE3ObserverModule
-from ball_world_model.training.targets import current_targets, quaternion_xyzw_to_matrix
+from ball_world_model.training.targets import quaternion_xyzw_to_matrix, window_targets
 
 
 
@@ -152,19 +152,6 @@ def _error_vs_magnitude(path: Path, magnitude: np.ndarray, error: np.ndarray, x_
     figure.savefig(path, dpi=180); plt.close(figure)
 
 
-def _attention_plot(path: Path, twist: np.ndarray | None, acceleration: np.ndarray | None) -> None:
-    if twist is None and acceleration is None:
-        return
-    figure, axis = plt.subplots(figsize=(8, 4.5), constrained_layout=True)
-    if twist is not None:
-        axis.plot(np.arange(twist.shape[1]), twist.mean(axis=0), marker="o", label="twist")
-    if acceleration is not None:
-        axis.plot(np.arange(acceleration.shape[1]), acceleration.mean(axis=0), marker="o", label="acceleration")
-    axis.set_xlabel("Temporal interval index"); axis.set_ylabel("Mean attention weight")
-    axis.set_title("Temporal evidence used by the observer"); axis.grid(alpha=0.25); axis.legend()
-    figure.savefig(path, dpi=180); plt.close(figure)
-
-
 def _trajectory_plots(output: Path, records: dict[str, np.ndarray], count: int) -> None:
     if count <= 0:
         return
@@ -202,37 +189,38 @@ def _collect(module: SE3ObserverModule, loader, device: torch.device, maximum: i
             break
         keep = min(batch_size, maximum - seen)
         device_batch = _to_device(batch, device)
-        prediction = module.model(device_batch["context_rgb"], device_batch.get("context_time"))
-        target = current_targets(device_batch)
-        orientation_error = torch.linalg.vector_norm(
-            so3_log(target.rotation.transpose(-1, -2) @ prediction.pose.rotation), dim=-1
-        )
-        carrier_target = carrier_state(target.position, target.rotation, module.model.templates)
-        carrier_rmse = torch.sqrt((prediction.carrier - carrier_target).square().mean(dim=(-2, -1)))
+
+        prediction = module.model(device_batch["context_rgb"], device_batch["context_time"])
+        state, target = prediction.current, window_targets(device_batch).current
+        orientation_error = rotation_angle(target.rotation, state.pose.rotation)
+
+        # One-step rollout from the current state to the first future frame.
         dt = (device_batch["future_time"][:, 0] - device_batch["context_time"][:, -1]).clamp_min(1.0e-6)
         next_p, next_r, next_v, next_w = propagate_world(
-            prediction.pose.position, prediction.pose.rotation, prediction.twist.linear,
-            prediction.twist.angular, dt, prediction.acceleration.linear, prediction.acceleration.angular,
+            state.pose.position, state.pose.rotation,
+            state.twist.linear, state.twist.angular,
+            dt,
+            state.acceleration.linear, state.acceleration.angular,
         )
         true_next_r = quaternion_xyzw_to_matrix(device_batch["future_quaternion_xyzw"][:, 0])
-        rollout_orientation = torch.linalg.vector_norm(so3_log(true_next_r.transpose(-1, -2) @ next_r), dim=-1)
+        
         tensors = {
-            "pred_position": prediction.pose.position, "true_position": target.position,
-            "pred_linear_velocity": prediction.twist.linear, "true_linear_velocity": target.linear_velocity,
-            "pred_angular_velocity": prediction.twist.angular, "true_angular_velocity": target.angular_velocity,
-            "pred_linear_acceleration": prediction.acceleration.linear, "true_linear_acceleration": target.linear_acceleration,
-            "pred_angular_acceleration": prediction.acceleration.angular, "true_angular_acceleration": target.angular_acceleration,
-            "orientation_error_deg": torch.rad2deg(orientation_error), "carrier_rmse": carrier_rmse,
+            "pred_position": state.pose.position, "true_position": target.position,
+            "pred_linear_velocity": state.twist.linear, "true_linear_velocity": target.linear_velocity,
+            "pred_angular_velocity": state.twist.angular, "true_angular_velocity": target.angular_velocity,
+            "pred_linear_acceleration": state.acceleration.linear, "true_linear_acceleration": target.linear_acceleration,
+            "pred_angular_acceleration": state.acceleration.angular, "true_angular_acceleration": target.angular_acceleration,
+            "orientation_error_deg": torch.rad2deg(orientation_error),
             "rollout_position_error": torch.linalg.vector_norm(next_p - device_batch["future_position"][:, 0], dim=-1),
-            "rollout_orientation_error_deg": torch.rad2deg(rollout_orientation),
+            "rollout_orientation_error_deg": torch.rad2deg(rotation_angle(true_next_r, next_r)),
             "rollout_linear_velocity_error": torch.linalg.vector_norm(next_v - device_batch["future_linear_velocity"][:, 0], dim=-1),
             "rollout_angular_velocity_error": torch.linalg.vector_norm(next_w - device_batch["future_angular_velocity"][:, 0], dim=-1),
             "time": device_batch["context_time"][:, -1],
         }
+
         for key, value in tensors.items():
             values.setdefault(key, []).append(value[:keep].detach().cpu().numpy())
-        for key, value in (("twist_attention", prediction.aux.twist_attention), ("acceleration_attention", prediction.aux.acceleration_attention)):
-            if value is not None: values.setdefault(key, []).append(value[:keep].detach().cpu().numpy())
+
         values.setdefault("trajectory_id", []).append(np.asarray(batch["trajectory_id"][:keep], dtype=str))
         seen += keep
     return {key: np.concatenate(parts, axis=0) for key, parts in values.items()}
@@ -247,14 +235,15 @@ def _summary(records: dict[str, np.ndarray]) -> dict[str, Any]:
         "linear_acceleration": _regression_metrics(records["pred_linear_acceleration"], records["true_linear_acceleration"]),
         "angular_acceleration": _regression_metrics(records["pred_angular_acceleration"], records["true_angular_acceleration"]),
     }
-    for name in ("orientation_error_deg", "carrier_rmse", "rollout_position_error", "rollout_orientation_error_deg", "rollout_linear_velocity_error", "rollout_angular_velocity_error"):
+
+    for name in ("orientation_error_deg", "rollout_position_error", "rollout_orientation_error_deg", "rollout_linear_velocity_error", "rollout_angular_velocity_error"):
         value = records[name]
         summary[name] = {"mean": float(value.mean()), "median": float(np.median(value)), "p95": float(np.percentile(value, 95)), "maximum": float(value.max())}
     return summary
 
 
 def _write_window_csv(path: Path, records: dict[str, np.ndarray]) -> None:
-    fields = ["trajectory_id", "time", "orientation_error_deg", "carrier_rmse", "rollout_position_error", "rollout_orientation_error_deg", "rollout_linear_velocity_error", "rollout_angular_velocity_error"]
+    fields = ["trajectory_id", "time", "orientation_error_deg", "rollout_position_error", "rollout_orientation_error_deg", "rollout_linear_velocity_error", "rollout_angular_velocity_error"]
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.DictWriter(handle, fieldnames=fields); writer.writeheader()
         for index in range(len(records["trajectory_id"])):
@@ -267,7 +256,7 @@ def evaluate_kinematic_observer(
     output_directory: str | Path,
     settings: EvaluationSettings = EvaluationSettings(),
 ) -> Path:
-    """Evaluate state decoding, SE(3) geometry, temporal evidence, and one-step rollout."""
+    """Evaluate the current-state estimate (last context frame) and a one-step rollout."""
     torch.manual_seed(settings.seed); np.random.seed(settings.seed)
     checkpoint_path, training_config_path, output = Path(checkpoint_path), Path(training_config_path), Path(output_directory)
     output.mkdir(parents=True, exist_ok=True)
@@ -285,6 +274,8 @@ def evaluate_kinematic_observer(
     summary["training_config"] = str(training_config_path.resolve())
     _save_json(output / "metrics.json", summary)
     _write_window_csv(output / "window_errors.csv", records)
+
+    # Generate plots
     _component_scatter(output / "position_components.png", records["pred_position"], records["true_position"], "Position", "m")
     _component_scatter(output / "linear_velocity_components.png", records["pred_linear_velocity"], records["true_linear_velocity"], "Linear velocity", "m/s")
     _component_scatter(output / "angular_velocity_components.png", records["pred_angular_velocity"], records["true_angular_velocity"], "Angular velocity", "rad/s")
@@ -300,6 +291,5 @@ def evaluate_kinematic_observer(
     })
     _error_vs_magnitude(output / "linear_velocity_error_vs_speed.png", np.linalg.norm(records["true_linear_velocity"], axis=1), np.linalg.norm(records["pred_linear_velocity"]-records["true_linear_velocity"], axis=1), "True speed [m/s]", "Velocity error [m/s]")
     _error_vs_magnitude(output / "angular_velocity_error_vs_speed.png", np.linalg.norm(records["true_angular_velocity"], axis=1), np.linalg.norm(records["pred_angular_velocity"]-records["true_angular_velocity"], axis=1), "True angular speed [rad/s]", "Angular-velocity error [rad/s]")
-    _attention_plot(output / "temporal_attention.png", records.get("twist_attention"), records.get("acceleration_attention"))
     _trajectory_plots(output / "trajectories", records, settings.trajectory_plots)
     return output

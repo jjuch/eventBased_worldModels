@@ -1,4 +1,4 @@
-"""Lightning wrapper. Dataset construction remains owned by the existing project."""
+"""Lightning wrapper around the SE(3) observer. Dataset construction lives in train_kinematic."""
 
 from __future__ import annotations
 
@@ -6,15 +6,14 @@ import lightning as L
 import torch
 
 from ball_world_model.models.observer import SE3Observer, SE3ObserverConfig
-from ball_world_model.models.teacher import SE3Teacher
-from .losses import LossWeights, observer_losses
-from .targets import current_targets
+from .losses import LossSettings, observer_losses, physical_metrics
+from .targets import future_targets, window_targets
 
 class SE3ObserverModule(L.LightningModule):
     def __init__(
         self, 
         model_config: dict, 
-        loss_weights: dict | None = None,
+        loss_config: dict | None = None,
         learning_rate: float = 3.0e-4, 
         weight_decay: float = 5.0e-2,
     ) -> None:
@@ -23,29 +22,28 @@ class SE3ObserverModule(L.LightningModule):
 
         config = SE3ObserverConfig(**model_config)
         self.model = SE3Observer(config)
-        self.teacher = SE3Teacher(config.carrier_points, config.carrier_radius)
-        self.weights = LossWeights(**(loss_weights or {}))
-        self.learning_rate = learning_rate
-        self.weight_decay = weight_decay
+        self.loss_settings = LossSettings(**(loss_config or {}))
 
-    def _step(self, batch, stage: str):
-        prediction = self.model(batch["context_rgb"], batch.get("context_time"))
-        target = current_targets(batch)
-        scales = {
-            "position": self.model.position_std,
-            "linear_velocity": self.model.linear_velocity_std,
-            "angular_velocity": self.model.angular_velocity_std,
-            "linear_acceleration": self.model.linear_acceleration_std,
-            "angular_acceleration": self.model.angular_acceleration_std,
-        }
-        total, components = observer_losses(prediction, target, self.teacher, self.weights, scales)
+    def _step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
+        prediction = self.model(batch["context_rgb"], batch["context_time"])
+        targets = window_targets(batch)
+        future = (
+            future_targets(batch, self.loss_settings.rollout_steps)
+            if self.self.loss_settings.rollout > 0
+            else None
+        )
+        total, components = observer_losses(
+            prediction, targets, self.model.scales(), self.loss_settings, future,
+        )
 
-        self.log(f"{stage}/loss", total, prog_bar=True, on_epoch=True, batch_size=len(batch["context_rgb"]))
-        for name, value in components.items():
-            self.log(f"{stage}/{name}", value, on_epoch=True, batch_size=len(batch["context_rgb"]))
+        batch_size = len(batch["context_rgb"])
+        self.log(f"{stage}/loss", total, prog_bar=True, on_epoch=True, batch_size=batch_size)
+        logged = {f"{stage}/loss_{name}": value.detach() for name, value in components.items()}
+        logged.update({f"{stage}/{name}": value for name, value in physical_metrics(prediction, targets).items()})
+        self.log_dict(logged, on_step=False, on_epoch=True, batch_size=batch_size)
         return total
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_index: int) -> None:
+    def training_step(self, batch: dict[str, torch.Tensor], batch_index: int) -> torch.Tensor:
         del batch_index
         return self._step(batch, "train")
     

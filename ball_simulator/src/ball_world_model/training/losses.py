@@ -1,98 +1,126 @@
-"""Direct physical losses with optional geometric regularisation."""
+"""Observer losses. Every term is dimensionless and O(1) when errors are of typical size.
+
+    position, linear/angular velocity, linear/angular acceleration:
+        squared error divided by the training-set std of that quantity
+    orientation:
+        squared angle divided by orientation_scale^2
+    rollout:
+        the current state is propagated with constant acceleration to the
+        future frames; its pose errors are scaled like the pose terms
+
+The total is
+    pose * (position + orientation) + twist * (linear + angular velocity)
+    + acceleration * (linear + angular acceleration) + rollout * (rollout position + orientation)
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
+
 import torch
-import torch.nn.functional as F
 from torch import Tensor
 
-from ball_world_model.geometry.se3 import propagate_world, so3_log
+from ball_world_model.geometry.se3 import chordal_angle_squared, rollout_world, rotation_angle
 from ball_world_model.models.state import ObserverPrediction
-from ball_world_model.models.teacher import SE3Teacher
-from .targets import CurrentTargets
+from .targets import FutureTargets, WindowTargets
 
 @dataclass(frozen=True)
-class LossWeights:
+class LossSettings:
     pose: float = 1.0
     twist: float = 1.0
     acceleration: float = 1.0
-    carrier: float = 0.05
-    carrier_velocity: float = 0.05
-    carrier_acceleration: float = 0.05
-    rollout: float = 0.05
+    rollout: float = 0.1
+    rollout_steps: int = 5
+    orientation_scale_deg: float = 5.0
+
+    @property
+    def orientation_scale_rad(self) -> float:
+        return math.radians(self.orientation_scale_deg)
 
 
 def scaled_mse(prediction: Tensor, target: Tensor, scale: Tensor) -> Tensor:
-    return F.mse_loss((prediction - target) / scale.clamp_min(1.0e-6), torch.zeros_like(target))
+    return ((prediction - target) / scale).square().mean()
+
+
+def orientation_loss(prediction: Tensor, target: Tensor, scale_rad: float) -> Tensor:
+    return chordal_angle_squared(prediction, target).mean() / scale_rad**2
 
 
 def observer_losses(
     prediction: ObserverPrediction,
-    target: CurrentTargets,
-    teacher: SE3Teacher,
-    weights: LossWeights,
+    targets: WindowTargets,
     scales: dict[str, Tensor],
-    previous: CurrentTargets | None = None,
-    dt: Tensor | None = None,
+    settings: LossSettings,
+    future: FutureTargets | None = None,
 ) -> tuple[Tensor, dict[str, Tensor]]:
-    zero = prediction.pose.position.new_zeros(())
+    zero = prediction.frame_poses.position.new_zeros(())
+    poses, twists, accelerations = (
+        prediction.frame_poses, prediction.interval_twists, prediction.interval_accelerations
+    )
 
-    position = scaled_mse(prediction.pose.position, target.position, scales["position"])
-    orientation = so3_log(target.rotation.transpose(-1, -2) @ prediction.pose.rotation).square().sum(-1).mean()
-
-    linear_velocity = scaled_mse(prediction.twist.linear, target.linear_velocity, scales["linear_velocity"])
-    angular_velocity = scaled_mse(prediction.twist.angular, target.angular_velocity, scales["angular_velocity"])
-
-    linear_acceleration = angular_acceleration = carrier = carrier_velocity = carrier_acceleration = rollout = zero
-
-    if weights.acceleration > 0:
-        linear_acceleration = scaled_mse(prediction.acceleration.linear, target.linear_acceleration, scales["linear_acceleration"])
-        angular_acceleration = scaled_mse(prediction.acceleration.angular, target.angular_acceleration, scales["angular_acceleration"])
-    
-    need_teacher = weights.carrier > 0 or weights.carrier_velocity > 0 or weights.carrier_acceleration > 0
-    if need_teacher:
-        targets = teacher(
-            target.position, 
-            target.rotation, 
-            target.linear_velocity, 
-            target.angular_velocity, 
-            target.linear_acceleration, 
-            target.angular_acceleration
-        )
-        if weights.carrier > 0: 
-            carrier = F.mse_loss(prediction.carrier, targets.carrier)
-        if weights.carrier_velocity > 0: 
-            carrier_velocity = F.mse_loss(prediction.carrier_velocity, targets.carrier_velocity)
-        if weights.carrier_acceleration > 0: 
-            carrier_acceleration = F.mse_loss(prediction.carrier_acceleration, targets.carrier_acceleration)
-
-    if weights.rollout > 0 and previous is not None and dt is not None:
-        p, r, v, w = propagate_world(
-            previous.position, previous.rotation, previous.linear_velocity, previous.angular_velocity, dt,
-            prediction.acceleration.linear, prediction.acceleration.angular,
-        )
-        rollout = (
-            scaled_mse(p, target.position, scales["position"])
-            + so3_log(target.rotation.transpose(-1, -2) @ r).square().sum(-1).mean()
-            + scaled_mse(v, target.linear_velocity, scales["linear_velocity"])
-            + scaled_mse(w, target.angular_velocity, scales["angular_velocity"])
-        )
     components = {
-        "position": position, "orientation": orientation,
-        "linear_velocity": linear_velocity, "angular_velocity": angular_velocity,
-        "linear_acceleration": linear_acceleration, "angular_acceleration": angular_acceleration,
-        "carrier": carrier, "carrier_velocity": carrier_velocity,
-        "carrier_acceleration": carrier_acceleration, "rollout": rollout,
+        "position": scaled_mse(poses.position, targets.frame_position, scales["position"]),
+        "orientation": orientation_loss(poses.rotation, targets.frame_rotation, settings.orientation_scale_rad),
+        "linear_velocity": scaled_mse(twists.linear, targets.interval_linear_velocity, scales["linear_velocity"]),
+        "angular_velocity": scaled_mse(twists.angular, targets.interval_angular_velocity, scales["angular_velocity"]),
+        "linear_acceleration": scaled_mse(
+            accelerations.linear, targets.interval_linear_acceleration, scales["linear_acceleration"]
+        ),
+        "angular_acceleration": scaled_mse(
+            accelerations.angular, targets.interval_angular_acceleration, scales["angular_acceleration"]
+        ),
+        "rollout_position": zero,
+        "rollout_orientation": zero,
     }
+
+    if settings.rollout > 0 and future is not None:
+        state = prediction.current
+        rollout_position, rollout_rotation = rollout_world(
+            state.pose.position, state.pose.rotation,
+            state.twist.linear, state.twist.angular,
+            state.acceleration.linear, state.acceleration.angular,
+            future.horizons,
+        )
+        components["rollout_position"] = scaled_mse(rollout_position, future.position, scales["position"])
+        components["rollout_orientation"] = orientation_loss(
+            rollout_rotation, future.rotation, settings.orientation_scale_rad
+        )
     
     total = (
-        weights.pose * (position + orientation)
-        + weights.twist * (linear_velocity + angular_velocity)
-        + weights.acceleration * (linear_acceleration + angular_acceleration)
-        + weights.carrier * carrier
-        + weights.carrier_velocity * carrier_velocity
-        + weights.carrier_acceleration * carrier_acceleration
-        + weights.rollout * rollout
+        settings.pose * (components["position"] + components["orientation"])
+        + settings.twist * (components["linear_velocity"] + components["angular_velocity"])
+        + settings.acceleration * (components["linear_acceleration"] + components["angular_acceleration"])
+        + settings.rollout * (components["rollout_position"] + components["rollout_orientation"])
     )
     return total, components
+
+
+@torch.no_grad()
+def physical_metrics(prediction: ObserverPrediction, targets: WindowTargets) -> dict[str, Tensor]:
+    """Errors in physical units for logging: frame/interval quantities and the current state."""
+
+    def rmse(error: Tensor) -> Tensor:
+        return error.square().sum(-1).mean().sqrt()
+
+    current, current_target = prediction.current, targets.current
+    return {
+        "position_rmse_m": rmse(prediction.frame_poses.position - targets.frame_position),
+        "orientation_error_deg": torch.rad2deg(
+            rotation_angle(prediction.frame_poses.rotation, targets.frame_rotation)
+        ).mean(),
+        "interval_linear_velocity_rmse_mps": rmse(
+            prediction.interval_twists.linear - targets.interval_linear_velocity
+        ),
+        "interval_angular_velocity_rmse_radps": rmse(
+            prediction.interval_twists.angular - targets.interval_angular_velocity
+        ),
+        "interval_linear_acceleration_rmse_mps2": rmse(
+            prediction.interval_accelerations.linear - targets.interval_linear_acceleration
+        ),
+        "interval_angular_acceleration_rmse_radps2": rmse(
+            prediction.interval_accelerations.angular - targets.interval_angular_acceleration
+        ),
+        "current_linear_velocity_rmse_mps": rmse(current.twist.linear - current_target.linear_velocity),
+        "current_angular_velocity_rmse_radps": rmse(current.twist.angular - current_target.angular_velocity),
+    }

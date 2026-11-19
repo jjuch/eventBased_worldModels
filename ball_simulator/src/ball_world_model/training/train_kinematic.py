@@ -1,4 +1,4 @@
-"""CLI-facing training entry point for the lean causal SE(3) observer."""
+"""CLI-facing training entry point for the SE(3) observer."""
 
 from __future__ import annotations
 
@@ -10,15 +10,24 @@ import torch
 
 from ball_world_model.config import DataConfig, KinematicTrainingConfig
 from ball_world_model.data.dataset import RenderedTrajectoryDataset, build_dataloader
+from ball_world_model.models.observer import STANDARDISED_QUANTITIES
 from .module import SE3ObserverModule
 from .statistics import StateStatistics, compute_statistics
 
+
 def _model_config_with_statistics(model_config: dict[str, object], statistics: StateStatistics) -> dict[str, object]:
     result = dict(model_config)
-    for name in ("position", "linear_velocity", "angular_velocity", "linear_acceleration", "angular_acceleration"):
+    for name in STANDARDISED_QUANTITIES:
         result[f"{name}_mean"] = statistics.means[name].tolist()
         result[f"{name}_std"] = statistics.stds[name].tolist()
     return result
+
+
+def _report_statistics(statistics: StateStatistics) -> None:
+    for name in STANDARDISED_QUANTITIES:
+        std = ", ".join(f"{value:.4g}" for value in statistics.stds[name].tolist())
+        note = "" if statistics.informative[name] else " <- constant in the data; its R^2 is undefined."
+        print(f"[train_kinematic] {name:<21} std = ({std}){note}")
 
 
 def train_kinematic(config_path: str | Path) -> Path:
@@ -36,11 +45,18 @@ def train_kinematic(config_path: str | Path) -> Path:
     validation_loader = build_dataloader(validation_data, data_config, shuffle=False)
     test_loader = build_dataloader(test_data, data_config, shuffle=False)
 
+    if config.loss.rollout > 0 and config.loss.rollout_steps > data_config.temporal.prediction_frames:
+        raise ValueError(
+            f"loss.rollout_steps ({config.loss.rollout_steps}) exceeds the "
+            f"{data_config.temporal.prediction_frames} prediction frames in the data config."
+        )
+
     statistics = compute_statistics(statistics_loader)
+    _report_statistics(statistics)
 
     module = SE3ObserverModule(
         model_config=_model_config_with_statistics(config.model.model_dump(), statistics),
-        loss_weights=config.loss.model_dump(),
+        loss_config=config.loss.model_dump(),
         learning_rate=config.optimiser.learning_rate,
         weight_decay=config.optimiser.weight_decay,
     )
