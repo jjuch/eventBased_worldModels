@@ -41,7 +41,7 @@ class SE3Observer(nn.Module):
         super().__init__()
         self.config = config
 
-        self.frame_encoder = CoordinateAwareFrameEncoder(config.feature_channels, config.descriptor_dim)
+        self.frame_encoder = CoordinateAwareFrameEncoder(config.feature_channels)
         self.spatial_encoder = SpatialKeypointEncoder(config.feature_channels, config.keypoints, config.keypoint_dim, config.descriptor_dim)
 
         self.pose_head = nn.Sequential(

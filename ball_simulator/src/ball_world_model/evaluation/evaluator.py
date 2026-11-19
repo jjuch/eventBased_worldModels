@@ -53,10 +53,54 @@ def _regression_metrics(prediction: np.ndarray, target: np.ndarray) -> dict[str,
         "p95_norm_error": float(np.percentile(np.linalg.norm(error, axis=1), 95)),
     }
 
+def _json_compatible(value):
+    """Convert NumPy and PyTorch values to standard JSON-compatible types."""
+
+    if isinstance(value, dict):
+        return {
+            str(key): _json_compatible(item)
+            for key, item in value.items()
+        }
+
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+
+    if isinstance(value, np.ndarray):
+        return _json_compatible(value.tolist())
+
+    if isinstance(value, np.generic):
+        return value.item()
+
+    if torch.is_tensor(value):
+        if value.ndim == 0:
+            return value.detach().cpu().item()
+
+        return _json_compatible(
+            value.detach().cpu().tolist()
+        )
+
+    if isinstance(value, Path):
+        return str(value)
+
+    return value
 
 def _save_json(path: Path, value: Any) -> None:
-    path.write_text(json.dumps(value, indent=2, sort_keys=True), encoding="utf-8")
+    compatible_value = _json_compatible(value)
+    path.write_text(json.dumps(
+        compatible_value, indent=2, sort_keys=True, allow_nan=False), encoding="utf-8")
 
+def _format_metric(
+    value: float | None,
+    format_spec: str,
+    *,
+    unavailable: str = "undefined",
+) -> str:
+    """Format a metric while handling undefined values."""
+
+    if value is None:
+        return unavailable
+
+    return format(value, format_spec)
 
 def _component_scatter(path: Path, prediction: np.ndarray, target: np.ndarray, name: str, unit: str) -> None:
     labels = ("x", "y", "z")
@@ -67,7 +111,9 @@ def _component_scatter(path: Path, prediction: np.ndarray, target: np.ndarray, n
         axis.scatter(x, y, s=10, alpha=0.55)
         low, high = min(x.min(), y.min()), max(x.max(), y.max())
         axis.plot([low, high], [low, high], color="black", linewidth=1.5)
-        axis.set_title(f"{name} {labels[component]}: RMSE={metrics['rmse'][component]:.4g}, R2={metrics['r2'][component]:.3f}")
+        rmse_text = _format_metric(metrics["rmse"][component], ".4g")
+        r2_text = _format_metric(metrics["r2"][component], ".3f")
+        axis.set_title(f"{name} {labels[component]}: RMSE={rmse_text}, R²={r2_text}")
         axis.set_xlabel(f"True [{unit}]")
         axis.set_ylabel(f"Predicted [{unit}]")
         axis.grid(alpha=0.25)

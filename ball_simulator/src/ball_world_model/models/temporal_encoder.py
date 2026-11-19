@@ -28,19 +28,37 @@ class CausalAttentionPool(nn.Module):
 class TwistEncoder(nn.Module):
     def __init__(self, keypoints: int, keypoint_dim: int, hidden_dim: int) -> None:
         super().__init__()
-        pair_dim = keypoints * (2 * 2 + 3 * keypoint_dim + 1)
+        # Per keypoint:
+        # q_previous, q_current, q_rate: 3 x 2
+        # d_previous, d_current, d_rate: 3 x keypoint_dim
+        # current confidence: 1
+        features_per_keypoint = 3 * 2 + 3 * keypoint_dim + 1
+        interval_dim = keypoints * features_per_keypoint
+
         self.interval = nn.Sequential(
-            nn.Linear(pair_dim, hidden_dim), 
-            nn.LayerNorm(hidden_dim), 
+            nn.Linear(interval_dim, hidden_dim),
+            nn.LayerNorm(hidden_dim),
             nn.SiLU(),
         )
         self.pool = CausalAttentionPool(hidden_dim, hidden_dim, 6)
 
     def forward(self, coordinates: Tensor, descriptors: Tensor, confidence: Tensor, dt: Tensor) -> tuple[Tensor, Tensor]:
-        dq = (coordinates[:, 1:] - coordinates[:, :-1]) / dt[..., None, None]
-        dd = (descriptors[:, 1:] - descriptors[:, :-1]) / dt[..., None, None]
-        pair = torch.cat((coordinates[:, :-1], coordinates[:, 1:], dq, descriptors[:, :-1], descriptors[:, 1:], dd, confidence[:, 1:, :, None]), dim=-1)
-        return self.pool(self.interval(pair.flatten(-2)))
+        coordinate_rate = (coordinates[:, 1:] - coordinates[:, :-1]) / dt[..., None, None]
+        descriptor_rate = (descriptors[:, 1:] - descriptors[:, :-1]) / dt[..., None, None]
+        interval_features = torch.cat(
+            (coordinates[:, :-1], 
+             coordinates[:, 1:], 
+             coordinate_rate, 
+             descriptors[:, :-1], 
+             descriptors[:, 1:], 
+             descriptor_rate, 
+             confidence[:, 1:, :, None]), dim=-1
+        )
+
+        interval_features = interval_features.flatten(-2)
+        encoded_intervals = self.interval(interval_features)
+
+        return self.pool(encoded_intervals)
 
 
 class AccelerationEncoder(nn.Module):
