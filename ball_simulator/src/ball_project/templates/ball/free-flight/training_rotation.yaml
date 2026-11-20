@@ -16,6 +16,7 @@ loss:
   rollout: 0.1
   rollout_steps: 5
   orientation_scale_deg: 5.0
+  kinematic: 0.0
 optimiser:
   learning_rate: 0.0003
   weight_decay: 0.05

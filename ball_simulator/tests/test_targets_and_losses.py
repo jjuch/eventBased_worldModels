@@ -62,3 +62,29 @@ def test_rollout_reproduces_ballistic_motion():
     )
     assert torch.allclose(positions, targets.frame_position[:, 1:], atol=1e-5)
     assert torch.allclose(rotations, targets.frame_rotation[:, 1:], atol=1e-5)
+
+
+def test_perfect_prediction_has_zero_loss_including_kinematic_consistency():
+    """Feeding the targets back as predictions must give (near) zero for every term."""
+    from ball_world_model.models.observer import current_state
+    from ball_world_model.models.state import Acceleration, ObserverPrediction, Pose, Twist
+    from ball_world_model.training.losses import LossSettings, observer_losses
+
+    targets = window_targets(_ballistic_batch())
+    poses = Pose(targets.frame_position, targets.frame_rotation)
+    twists = Twist(targets.interval_linear_velocity, targets.interval_angular_velocity)
+    accelerations = Acceleration(targets.interval_linear_acceleration, targets.interval_angular_acceleration)
+    prediction = ObserverPrediction(
+        frame_poses=poses,
+        interval_twists=twists,
+        interval_accelerations=accelerations,
+        interval_dt=targets.interval_dt,
+        current=current_state(poses, twists, accelerations, targets.interval_dt),
+        keypoint_coordinates=torch.zeros(1, 8, 4, 2),
+    )
+    scales = {name: torch.ones(3) for name in (
+        "position", "linear_velocity", "angular_velocity", "linear_acceleration", "angular_acceleration")}
+    total, components = observer_losses(prediction, targets, scales, LossSettings(rollout=0.0, kinematic=1.0))
+    assert components["kinematic_linear"] < 1e-8
+    assert components["kinematic_angular"] < 1e-8
+    assert total < 1e-6

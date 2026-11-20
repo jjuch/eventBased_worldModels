@@ -1,7 +1,9 @@
 """Evaluation figures for whole windows and rollouts.
 
 Every function takes the ``records`` dictionary built by ``evaluator._collect``:
-NumPy arrays with one leading row per evaluated window. Shapes use N windows, T context frames, I = T - 1 intervals, F future frames and H = T - 1 + F horizons of the rollout that starts at the first context frame.
+NumPy arrays with one leading row per evaluated window. Shapes use
+N windows, T context frames, I = T - 1 intervals, F future frames and
+H = T - 1 + F horizons of the rollout that starts at the first context frame.
 
 Two rollouts are shown:
     rollout from current state: starts at the last context frame (what a world
@@ -9,6 +11,8 @@ Two rollouts are shown:
     rollout from first frame:   starts at the estimate for frame 0 and runs open
         loop through the rest of the window and the future frames. It is longer
         (H steps), so it shows how estimation errors grow with the horizon.
+Each rollout is also repeated without acceleration (constant twist). The gap
+between the two is what the acceleration estimate contributes.
 """
 
 from __future__ import annotations
@@ -47,26 +51,22 @@ def horizon_statistics(records: dict[str, np.ndarray]) -> dict[str, dict[str, li
             "p95": np.percentile(errors, 95, axis=0).tolist(),
         }
 
-    first_horizon = records["rollout_first_horizon"].mean(axis=0)
-    current_horizon = records["rollout_current_horizon"].mean(axis=0)
-    return {
-        "rollout_from_first_frame": {
-            "horizon_s": first_horizon.tolist(),
-            "position_error_m": describe(records["rollout_first_position_error"]),
-            "orientation_error_deg": describe(records["rollout_first_orientation_error_deg"]),
-        },
-        "rollout_from_current_state": {
-            "horizon_s": current_horizon.tolist(),
-            "position_error_m": describe(records["rollout_current_position_error"]),
-            "orientation_error_deg": describe(records["rollout_current_orientation_error_deg"]),
-        },
-    }
+    statistics = {}
+    for name, prefix in (("rollout_from_first_frame", "rollout_first"), ("rollout_from_current_state", "rollout_current")):
+        statistics[name] = {
+            "horizon_s": records[f"{prefix}_horizon"].mean(axis=0).tolist(),
+            "position_error_m": describe(records[f"{prefix}_position_error"]),
+            "orientation_error_deg": describe(records[f"{prefix}_orientation_error_deg"]),
+            "no_acceleration_position_error_m": describe(records[f"{prefix}_no_acceleration_position_error"]),
+            "no_acceleration_orientation_error_deg": describe(records[f"{prefix}_no_acceleration_orientation_error_deg"]),
+        }
+    return statistics
 
 
 def rollout_horizon_plot(path: Path, records: dict[str, np.ndarray]) -> None:
     """Rollout position and orientation error against the prediction horizon.
 
-    The dashed grey line is the median error of the per-frame estimates: the
+    Dashed coloured lines repeat each rollout without acceleration. The dashed grey line is the median error of the per-frame estimates: the
     accuracy obtained by simply observing every frame. A rollout that stays close
     to it adds little error of its own.
     """
@@ -95,6 +95,8 @@ def rollout_horizon_plot(path: Path, records: dict[str, np.ndarray]) -> None:
                 color=colour, alpha=0.2, label=f"{text}: 25-75 %",
             )
             axis.plot(steps, np.asarray(entry[key]["p95"]) * scale, linestyle=":", color=colour, label=f"{text}: p95")
+            axis.plot(steps, np.asarray(entry[f"no_acceleration_{key}"]["median"]) * scale, linestyle="--",
+                      marker="s", markersize=3, color=colour, alpha=0.7, label=f"{text}: median, no acceleration")
         axis.axhline(observation_floor[key] * scale, color="grey", linestyle="--", label="per-frame estimate (median)")
         axis.axvline(context_frames - 0.5, color="black", linewidth=0.8)
         axis.annotate("first-frame rollout leaves\nthe observed window", (context_frames - 0.4, axis.get_ylim()[1] * 0.9),
@@ -134,20 +136,34 @@ def _velocity_panel(axis, index: int, records: dict[str, np.ndarray], name: str,
     axis.set_title(f"{name.replace('_', ' ').capitalize()} [{unit}]  (estimates are interval means)")
 
 
+def _acceleration_panel(axis, index: int, records: dict[str, np.ndarray], kind: str, unit: str) -> None:
+    interval_time = records["interval_time"][index]
+    for component, colour in enumerate(COMPONENT_COLOURS):
+        axis.plot(interval_time, records[f"true_interval_{kind}_acceleration"][index, :, component], color=colour, **STYLE_TRUE)
+        axis.plot(interval_time, records[f"pred_interval_{kind}_acceleration"][index, :, component], color=colour, **STYLE_ESTIMATE)
+        axis.plot(interval_time[:-1] + 0.5 * np.diff(interval_time),
+                  records[f"pred_inner_{kind}_acceleration_from_twist"][index, :, component],
+                  color=colour, linestyle="none", marker="^", markersize=4, alpha=0.5)
+    axis.set_title(f"{kind.capitalize()} acceleration [{unit}]  (o head, ^ differenced velocities)")
+
+
 def _window_figure(path: Path, index: int, records: dict[str, np.ndarray]) -> None:
     frame_time, future_time = records["frame_time"][index], records["future_time"][index]
     all_time = np.concatenate((frame_time, future_time))
     rollout_first_time = all_time[1:]
     true_position = np.concatenate((records["true_frame_position"][index], records["true_future_position"][index]))
 
-    figure = plt.figure(figsize=(18, 9.5), constrained_layout=True)
-    grid = figure.add_gridspec(2, 3)
+    figure = plt.figure(figsize=(18, 14), constrained_layout=True)
+    grid = figure.add_gridspec(3, 3)
     position_axis = figure.add_subplot(grid[0, 0])
     linear_axis = figure.add_subplot(grid[0, 1])
     angular_axis = figure.add_subplot(grid[0, 2])
-    position_error_axis = figure.add_subplot(grid[1, 0])
-    orientation_error_axis = figure.add_subplot(grid[1, 1])
-    path_axis = figure.add_subplot(grid[1, 2], projection="3d")
+    linear_acceleration_axis = figure.add_subplot(grid[1, 0])
+    angular_acceleration_axis = figure.add_subplot(grid[1, 1])
+    ablation_axis = figure.add_subplot(grid[1, 2])
+    position_error_axis = figure.add_subplot(grid[2, 0])
+    orientation_error_axis = figure.add_subplot(grid[2, 1])
+    path_axis = figure.add_subplot(grid[2, 2], projection="3d")
 
     # Position components.
     for component, colour in enumerate(COMPONENT_COLOURS):
@@ -160,6 +176,20 @@ def _window_figure(path: Path, index: int, records: dict[str, np.ndarray]) -> No
 
     _velocity_panel(linear_axis, index, records, "linear_velocity", "m/s")
     _velocity_panel(angular_axis, index, records, "angular_velocity", "rad/s")
+    _acceleration_panel(linear_acceleration_axis, index, records, "linear", "m/s²")
+    _acceleration_panel(angular_acceleration_axis, index, records, "angular", "rad/s²")
+
+    # What acceleration contributes: rollout position error with and without it.
+    ablation_axis.plot(rollout_first_time, 1e3 * records["rollout_first_position_error"][index], color="tab:purple",
+                       **STYLE_ROLLOUT_FIRST, label="from first frame, with acceleration")
+    ablation_axis.plot(rollout_first_time, 1e3 * records["rollout_first_no_acceleration_position_error"][index],
+                       color="tab:purple", linestyle="-", alpha=0.45, label="from first frame, constant twist")
+    ablation_axis.plot(future_time, 1e3 * records["rollout_current_position_error"][index], color="tab:red",
+                       **STYLE_ROLLOUT_CURRENT, label="from current state, with acceleration")
+    ablation_axis.plot(future_time, 1e3 * records["rollout_current_no_acceleration_position_error"][index],
+                       color="tab:red", linestyle="-", alpha=0.45, label="from current state, constant twist")
+    ablation_axis.set_title("Rollout position error [mm]: with vs without acceleration")
+    ablation_axis.legend(fontsize=8)
 
     # Error norms over time.
     frame_position_error = np.linalg.norm(records["pred_frame_position"][index] - records["true_frame_position"][index], axis=-1)
@@ -180,7 +210,8 @@ def _window_figure(path: Path, index: int, records: dict[str, np.ndarray]) -> No
     orientation_error_axis.set_title("Orientation error [deg]")
     orientation_error_axis.legend(fontsize=8)
 
-    for axis in (position_axis, linear_axis, angular_axis, position_error_axis, orientation_error_axis):
+    for axis in (position_axis, linear_axis, angular_axis, linear_acceleration_axis, angular_acceleration_axis,
+                 ablation_axis, position_error_axis, orientation_error_axis):
         axis.axvspan(frame_time[-1], all_time[-1], color="grey", alpha=0.12, linewidth=0)
         axis.set_xlabel("Time [s]  (shaded: future frames, not observed)")
         axis.grid(alpha=0.25)
@@ -195,7 +226,7 @@ def _window_figure(path: Path, index: int, records: dict[str, np.ndarray]) -> No
     path_axis.legend(fontsize=7)
 
     figure.suptitle(f"Trajectory {records['trajectory_id'][index]}, window ending at t = {frame_time[-1]:.3f} s")
-    figure.savefig(path, dpi=150)
+    figure.savefig(path, dpi=140)
     plt.close(figure)
 
 
@@ -288,9 +319,7 @@ def rollout_overlay_plots(
     """Draw estimates and rollouts on the rendered frames, cropped around the true ball.
 
     images: uint8 [M, T + F, H, W, 3] for the first M windows (context then future frames).
-    Truth: black outline with filled markers. Per-frame estimate (context) and
-    rollout from the current state (future): hollow markers and an orange or red
-    outline. Rollout from the first frame: purple dotted outline.
+    Truth: black outline with filled markers. Per-frame estimate (context) and rollout from the current state (future): hollow markers and an orange or red outline. Rollout from the first frame: purple dotted outline.
     """
     output.mkdir(parents=True, exist_ok=True)
     context_frames = records["frame_time"].shape[1]

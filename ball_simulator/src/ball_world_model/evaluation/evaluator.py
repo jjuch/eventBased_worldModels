@@ -156,17 +156,35 @@ def _error_vs_magnitude(path: Path, magnitude: np.ndarray, error: np.ndarray, x_
     figure.savefig(path, dpi=180); plt.close(figure)
 
 
-def _rollout_from_first_frame(prediction: ObserverPrediction, horizons: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Open-loop rollout from the frame-0 estimate. horizons [B, H] in s since frame 0."""
+def _rollout_from_first_frame(prediction: ObserverPrediction, horizons: torch.Tensor, use_acceleration: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+    """Open-loop rollout from the frame-0 estimate. horizons [B, H] in s since frame 0.
+
+    Without acceleration the first interval-mean twist is held constant (the
+    constant-velocity baseline).
+    """
     poses, twists = prediction.frame_poses, prediction.interval_twists
     accelerations, half_step = prediction.interval_accelerations, 0.5 * prediction.interval_dt[:, :1]
-
-    # The first interval mean sits half a step after frame 0; step back to the instant of frame 0.
-    linear = twists.linear[:, 0] - half_step * accelerations.linear[:, 0]
-    angular = twists.angular[:, 0] - half_step * accelerations.angular[:, 0]
+    if use_acceleration:
+        # The first interval mean sits half a step after frame 0; step back to the instant of frame 0.
+        linear = twists.linear[:, 0] - half_step * accelerations.linear[:, 0]
+        angular = twists.angular[:, 0] - half_step * accelerations.angular[:, 0]
+        linear_acceleration, angular_acceleration = accelerations.linear[:, 0], accelerations.angular[:, 0]
+    else:
+        linear, angular = twists.linear[:, 0], twists.angular[:, 0]
+        linear_acceleration, angular_acceleration = torch.zeros_like(linear), torch.zeros_like(angular)
     return rollout_world(
-        poses.position[:, 0], poses.rotation[:, 0], linear, angular, accelerations.linear[:, 0], accelerations.angular[:, 0], horizons,
+        poses.position[:, 0], poses.rotation[:, 0], linear, angular, linear_acceleration, angular_acceleration, horizons,
     )
+
+
+def _twist_difference_acceleration(rates: torch.Tensor, dt: torch.Tensor) -> torch.Tensor:
+    """Acceleration implied by neighbouring interval-mean velocities, [B, I-1, 3].
+
+    Baseline for the acceleration head: it needs no acceleration branch at all.
+    It estimates the acceleration at the inner frames 1..T-2.
+    """
+    centre_dt = 0.5 * (dt[:, 1:] - dt[:, :-1]).unsqueeze(-1)
+    return (rates[:, 1:] - rates[:, :-1]) / centre_dt
 
 
 def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -182,8 +200,20 @@ def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Ten
         state.pose.position, state.pose.rotation, state.twist.linear, state.twist.angular,
         state.acceleration.linear, state.acceleration.angular, current_horizon,
     )
+
+    zero = torch.zeros_like(state.twist.linear)
+    current_position_no_acceleration, current_rotation_no_acceleration = rollout_world(
+        state.pose.position, state.pose.rotation, state.twist.linear, state.twist.angular,
+        zero, zero, current_horizon,
+    )
+
     first_horizon = torch.cat((context_time[:, 1:], future_time), dim=1) - context_time[:, :1]
     first_position, first_rotation = _rollout_from_first_frame(prediction, first_horizon)
+
+    first_position_no_acceleration, first_rotation_no_acceleration = _rollout_from_first_frame(
+        prediction, first_horizon, use_acceleration=False
+    )
+
     true_position_after_first = torch.cat((targets.frame_position[:, 1:], future_position), dim=1)
     true_rotation_after_first = torch.cat((targets.frame_rotation[:, 1:], future_rotation), dim=1)
  
@@ -202,6 +232,17 @@ def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Ten
         "pred_interval_linear_velocity": prediction.interval_twists.linear,
         "true_interval_angular_velocity": targets.interval_angular_velocity,
         "pred_interval_angular_velocity": prediction.interval_twists.angular,
+        "true_interval_linear_acceleration": targets.interval_linear_acceleration,
+        "pred_interval_linear_acceleration": prediction.interval_accelerations.linear,
+        "true_interval_angular_acceleration": targets.interval_angular_acceleration,
+        "pred_interval_angular_acceleration": prediction.interval_accelerations.angular,
+        # Inner frames 1..T-2: true acceleration (mean of the neighbouring interval means) and the acceleration implied by the predicted velocities, as a baseline for the acceleration head.
+        "true_inner_linear_acceleration": 0.5 * (targets.interval_linear_acceleration[:, 1:] + targets.interval_linear_acceleration[:, :-1]),
+        "pred_inner_linear_acceleration_from_twist": _twist_difference_acceleration(prediction.interval_twists.linear, prediction.interval_dt),
+        "pred_inner_linear_acceleration_from_head": 0.5 * (prediction.interval_accelerations.linear[:, 1:] + prediction.interval_accelerations.linear[:, :-1]),
+        "true_inner_angular_acceleration": 0.5 * (targets.interval_angular_acceleration[:, 1:] + targets.interval_angular_acceleration[:, :-1]),
+        "pred_inner_angular_acceleration_from_twist": _twist_difference_acceleration(prediction.interval_twists.angular, prediction.interval_dt),
+        "pred_inner_angular_acceleration_from_head": 0.5 * (prediction.interval_accelerations.angular[:, 1:] + prediction.interval_accelerations.angular[:, :-1]),
         "true_future_position": future_position,
         "true_future_rotation": future_rotation,
         "rollout_current_horizon": current_horizon,
@@ -209,11 +250,15 @@ def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Ten
         "rollout_current_rotation": current_rotation,
         "rollout_current_position_error": torch.linalg.vector_norm(current_position - future_position, dim=-1),
         "rollout_current_orientation_error_deg": torch.rad2deg(rotation_angle(future_rotation, current_rotation)),
+        "rollout_current_no_acceleration_position_error": torch.linalg.vector_norm(current_position_no_acceleration - future_position, dim=-1),
+        "rollout_current_no_acceleration_orientation_error_deg": torch.rad2deg(rotation_angle(future_rotation, current_rotation_no_acceleration)),
         "rollout_first_horizon": first_horizon,
         "rollout_first_position": first_position,
         "rollout_first_rotation": first_rotation,
         "rollout_first_position_error": torch.linalg.vector_norm(first_position - true_position_after_first, dim=-1),
         "rollout_first_orientation_error_deg": torch.rad2deg(rotation_angle(true_rotation_after_first, first_rotation)),
+        "rollout_first_no_acceleration_position_error": torch.linalg.vector_norm(first_position_no_acceleration - true_position_after_first, dim=-1),
+        "rollout_first_no_acceleration_orientation_error_deg": torch.rad2deg(rotation_angle(true_rotation_after_first, first_rotation_no_acceleration)),
     }
 
 @torch.inference_mode()
@@ -295,6 +340,30 @@ def _summary(records: dict[str, np.ndarray]) -> dict[str, Any]:
         summary[name] = {"mean": float(value.mean()), "median": float(np.median(value)), "p95": float(np.percentile(value, 95)), "maximum": float(value.max())}
 
     summary["rollout_vs_horizon"] = horizon_statistics(records)
+    summary["interval_acceleration"] = _interval_acceleration_summary(records)
+    return summary
+
+
+def _interval_acceleration_summary(records: dict[str, np.ndarray]) -> dict[str, Any]:
+    """Acceleration over every interval, and at inner frames head vs. differenced velocities."""
+
+    def flat(name: str) -> np.ndarray:
+        return records[name].reshape(-1, 3)
+
+    summary = {}
+    for kind in {"linear", "angular"}:
+        summary[kind] = {
+            "head_all_intervals": _regression_metrics(
+                flat(f"pred_interval_{kind}_acceleration"), flat(f"true_interval_{kind}_acceleration")
+            ),
+            "head_inner_frames": _regression_metrics(
+                flat(f"pred_inner_{kind}_acceleration_from_head"), flat(f"true_inner_{kind}_acceleration")
+            ),
+            "velocity_difference_inner_frames": _regression_metrics(
+                flat(f"pred_inner_{kind}_acceleration_from_twist"), flat(f"true_inner_{kind}_acceleration")
+            ),
+        }
+
     return summary
 
 
@@ -358,6 +427,20 @@ def evaluate_kinematic_observer(
     })
     _error_vs_magnitude(output / "linear_velocity_error_vs_speed.png", np.linalg.norm(records["true_linear_velocity"], axis=1), np.linalg.norm(records["pred_linear_velocity"]-records["true_linear_velocity"], axis=1), "True speed [m/s]", "Velocity error [m/s]")
     _error_vs_magnitude(output / "angular_velocity_error_vs_speed.png", np.linalg.norm(records["true_angular_velocity"], axis=1), np.linalg.norm(records["pred_angular_velocity"]-records["true_angular_velocity"], axis=1), "True angular speed [rad/s]", "Angular-velocity error [rad/s]")
+
+    for kind, unit in (("linear", "m/s²"), ("angular", "rad/s²")):
+        _component_scatter(
+            output / f"interval_{kind}_acceleration_head.png",
+            records[f"pred_interval_{kind}_acceleration"].reshape(-1, 3),
+            records[f"true_interval_{kind}_acceleration"].reshape(-1, 3),
+            f"{kind.capitalize()} acceleration, head, every interval", unit,
+        )
+        _component_scatter(
+            output / f"inner_{kind}_acceleration_from_velocity_difference.png",
+            records[f"pred_inner_{kind}_acceleration_from_twist"].reshape(-1, 3),
+            records[f"true_inner_{kind}_acceleration"].reshape(-1, 3),
+            f"{kind.capitalize()} acceleration, differenced velocities", unit,
+        )
 
     trajectory_window_plots(output / "trajectories", records, settings.trajectory_plots)
 

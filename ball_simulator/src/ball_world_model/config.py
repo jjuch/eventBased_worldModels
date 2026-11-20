@@ -109,6 +109,7 @@ class ObserverLossConfig(StrictModel):
     rollout: float = Field(default=0.1, ge=0.0)
     rollout_steps: int = Field(default=5, ge=1)
     orientation_scale_deg: float = Field(default=5.0, gt=0.0)
+    kinematic: float = Field(default=0.0, ge=0.0)
 
 
 class OptimiserConfig(StrictModel):

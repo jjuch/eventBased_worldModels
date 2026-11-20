@@ -7,10 +7,13 @@
     rollout:
         the current state is propagated with constant acceleration to the
         future frames; its pose errors are scaled like the pose terms
+    kinematic (optional, default weight 0):
+        the predicted velocity change between neighbouring intervals must match the predicted accelerations, (xi[k+1] - xi[k]) = dt_centre * (xi_dot[k] + xi_dot[k+1]) / 2;
+        the error is a velocity, so it is scaled by the velocity std
 
 The total is
     pose * (position + orientation) + twist * (linear + angular velocity)
-    + acceleration * (linear + angular acceleration) + rollout * (rollout position + orientation)
+    + acceleration * (linear + angular acceleration) + rollout * (rollout position + orientation) + kinematic * (linear + angular kinematic consistency)
 """
 
 from __future__ import annotations
@@ -33,6 +36,7 @@ class LossSettings:
     rollout: float = 0.1
     rollout_steps: int = 5
     orientation_scale_deg: float = 5.0
+    kinematic: float = 0.0
 
     @property
     def orientation_scale_rad(self) -> float:
@@ -45,6 +49,18 @@ def scaled_mse(prediction: Tensor, target: Tensor, scale: Tensor) -> Tensor:
 
 def orientation_loss(prediction: Tensor, target: Tensor, scale_rad: float) -> Tensor:
     return chordal_angle_squared(prediction, target).mean() / scale_rad**2
+
+
+def kinematic_consistency(rates: Tensor, accelerations: Tensor, dt: Tensor, velocity_scale: Tensor) -> Tensor:
+    """Mismatch between the velocity change across neighbouring intervals and the accelerations.
+
+    rates [B, I, 3] interval-mean velocities, accelerations [B, I, 3] interval-mean accelerations, dt [B, I]. Interval means sit at interval centres, which are dt_centre = (dt[k] + dt[k+1]) / 2 apart; under a linearly varying acceleration the velocity change between them is dt_centre * (a[k] + a[k+1]) / 2.
+    The error is a velocity and is scaled by the velocity std, so the term stays well conditioned even when the data contain no acceleration.
+    """
+    centre_dt = 0.5 * (dt[:, 1:] + dt[:, :-1]).unsqueeze(-1)
+    velocity_change = rates[:, 1:] - rates[:, :-1]
+    implied_change = centre_dt * 0.5 * (accelerations[:, 1:] + accelerations[:, :-1])
+    return scaled_mse(velocity_change, implied_change, velocity_scale)
 
 
 def observer_losses(
@@ -72,6 +88,8 @@ def observer_losses(
         ),
         "rollout_position": zero,
         "rollout_orientation": zero,
+        "kinematic_linear": zero,
+        "kinematic_angular": zero,
     }
 
     if settings.rollout > 0 and future is not None:
@@ -86,12 +104,21 @@ def observer_losses(
         components["rollout_orientation"] = orientation_loss(
             rollout_rotation, future.rotation, settings.orientation_scale_rad
         )
+
+    if settings.kinematic > 0:
+        components["kinematic_linear"] = kinematic_consistency(
+            twists.linear, accelerations.linear, prediction.interval_dt, scales["linear_velocity"]
+        )
+        components["kinematic_angular"] = kinematic_consistency(
+            twists.angular, accelerations.angular, prediction.interval_dt, scales["angular_velocity"]
+        )
     
     total = (
         settings.pose * (components["position"] + components["orientation"])
         + settings.twist * (components["linear_velocity"] + components["angular_velocity"])
         + settings.acceleration * (components["linear_acceleration"] + components["angular_acceleration"])
         + settings.rollout * (components["rollout_position"] + components["rollout_orientation"])
+        + settings.kinematic * (components["kinematic_linear"] + components["kinematic_angular"])
     )
     return total, components
 
