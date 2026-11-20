@@ -15,9 +15,12 @@ import yaml
 
 from ball_world_model.config import DataConfig
 from ball_world_model.data.dataset import RenderedTrajectoryDataset, build_dataloader
-from ball_world_model.geometry.se3 import propagate_world, rotation_angle
+from ball_world_model.data.transforms import denormalise_rgb
+from ball_world_model.geometry.se3 import propagate_world, rotation_angle, rollout_world
+from ball_world_model.models.state import ObserverPrediction
 from ball_world_model.training.module import SE3ObserverModule
 from ball_world_model.training.targets import quaternion_xyzw_to_matrix, window_targets
+from .plots import PinholeCamera, horizon_statistics, rollout_horizon_plot, rollout_overlay_plots, trajectory_window_plots
 
 
 
@@ -27,6 +30,7 @@ class EvaluationSettings:
     maximum_probe_train_windows: int = 5_000  # Retained for CLI compatibility.
     trajectory_plots: int = 12
     seed: int = 20260824
+    ball_radius: float = 0.10 # m, only used to draw the ball in the overlay figures
 
 def _to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
     return {key: value.to(device) if torch.is_tensor(value) else value for key, value in batch.items()}
@@ -152,36 +156,75 @@ def _error_vs_magnitude(path: Path, magnitude: np.ndarray, error: np.ndarray, x_
     figure.savefig(path, dpi=180); plt.close(figure)
 
 
-def _trajectory_plots(output: Path, records: dict[str, np.ndarray], count: int) -> None:
-    if count <= 0:
-        return
-    output.mkdir(parents=True, exist_ok=True)
-    identifiers = records["trajectory_id"]
-    selected = list(dict.fromkeys(identifiers.tolist()))[:count]
-    for identifier in selected:
-        mask = identifiers == identifier
-        order = np.argsort(records["time"][mask])
-        time = records["time"][mask][order]
-        figure, axes = plt.subplots(2, 2, figsize=(13, 8), constrained_layout=True)
-        for component, label in enumerate("xyz"):
-            axes[0, 0].plot(time, records["true_position"][mask][order, component], marker="o", label=f"true {label}")
-            axes[0, 0].plot(time, records["pred_position"][mask][order, component], linestyle="--", marker="x", label=f"pred {label}")
-            axes[0, 1].plot(time, records["true_linear_velocity"][mask][order, component], marker="o")
-            axes[0, 1].plot(time, records["pred_linear_velocity"][mask][order, component], linestyle="--")
-            axes[1, 0].plot(time, records["true_angular_velocity"][mask][order, component])
-            axes[1, 0].plot(time, records["pred_angular_velocity"][mask][order, component], linestyle="--")
-            axes[1, 1].plot(time, records["orientation_error_deg"][mask][order])
-        axes[0, 0].set_title("Position [m]"); axes[0, 1].set_title("Linear velocity [m/s]")
-        axes[1, 0].set_title("Angular velocity [rad/s]"); axes[1, 1].set_title("Orientation error [deg]")
-        for axis in axes.flat: axis.set_xlabel("Time [s]"); axis.grid(alpha=0.25)
-        axes[0, 0].legend(ncol=3, fontsize=8)
-        figure.suptitle(f"Trajectory {identifier}")
-        figure.savefig(output / f"trajectory_{identifier}.png", dpi=170); plt.close(figure)
+def _rollout_from_first_frame(prediction: ObserverPrediction, horizons: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Open-loop rollout from the frame-0 estimate. horizons [B, H] in s since frame 0."""
+    poses, twists = prediction.frame_poses, prediction.interval_twists
+    accelerations, half_step = prediction.interval_accelerations, 0.5 * prediction.interval_dt[:, :1]
 
+    # The first interval mean sits half a step after frame 0; step back to the instant of frame 0.
+    linear = twists.linear[:, 0] - half_step * accelerations.linear[:, 0]
+    angular = twists.angular[:, 0] - half_step * accelerations.angular[:, 0]
+    return rollout_world(
+        poses.position[:, 0], poses.rotation[:, 0], linear, angular, accelerations.linear[:, 0], accelerations.angular[:, 0], horizons,
+    )
+
+
+def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Whole-window estimates and both rollouts, for the window and rollout figures."""
+    targets = window_targets(batch)
+    context_time, future_time = batch["context_time"].float(), batch["future_time"].float()
+    future_position = batch["future_position"].float()
+    future_rotation = quaternion_xyzw_to_matrix(batch["future_quaternion_xyzw"].float())
+    state = prediction.current
+ 
+    current_horizon = future_time - context_time[:, -1:]
+    current_position, current_rotation = rollout_world(
+        state.pose.position, state.pose.rotation, state.twist.linear, state.twist.angular,
+        state.acceleration.linear, state.acceleration.angular, current_horizon,
+    )
+    first_horizon = torch.cat((context_time[:, 1:], future_time), dim=1) - context_time[:, :1]
+    first_position, first_rotation = _rollout_from_first_frame(prediction, first_horizon)
+    true_position_after_first = torch.cat((targets.frame_position[:, 1:], future_position), dim=1)
+    true_rotation_after_first = torch.cat((targets.frame_rotation[:, 1:], future_rotation), dim=1)
+ 
+    return {
+        "frame_time": context_time,
+        "future_time": future_time,
+        "interval_time": 0.5 * (context_time[:, 1:] + context_time[:, :-1]),
+        "true_frame_position": targets.frame_position,
+        "pred_frame_position": prediction.frame_poses.position,
+        "true_frame_rotation": targets.frame_rotation,
+        "pred_frame_rotation": prediction.frame_poses.rotation,
+        "frame_orientation_error_deg": torch.rad2deg(rotation_angle(targets.frame_rotation, prediction.frame_poses.rotation)),
+        "true_frame_linear_velocity": targets.frame_linear_velocity,
+        "true_frame_angular_velocity": targets.frame_angular_velocity,
+        "true_interval_linear_velocity": targets.interval_linear_velocity,
+        "pred_interval_linear_velocity": prediction.interval_twists.linear,
+        "true_interval_angular_velocity": targets.interval_angular_velocity,
+        "pred_interval_angular_velocity": prediction.interval_twists.angular,
+        "true_future_position": future_position,
+        "true_future_rotation": future_rotation,
+        "rollout_current_horizon": current_horizon,
+        "rollout_current_position": current_position,
+        "rollout_current_rotation": current_rotation,
+        "rollout_current_position_error": torch.linalg.vector_norm(current_position - future_position, dim=-1),
+        "rollout_current_orientation_error_deg": torch.rad2deg(rotation_angle(future_rotation, current_rotation)),
+        "rollout_first_horizon": first_horizon,
+        "rollout_first_position": first_position,
+        "rollout_first_rotation": first_rotation,
+        "rollout_first_position_error": torch.linalg.vector_norm(first_position - true_position_after_first, dim=-1),
+        "rollout_first_orientation_error_deg": torch.rad2deg(rotation_angle(true_rotation_after_first, first_rotation)),
+    }
 
 @torch.inference_mode()
-def _collect(module: SE3ObserverModule, loader, device: torch.device, maximum: int) -> dict[str, np.ndarray]:
+def _collect(module: SE3ObserverModule, loader, device: torch.device, maximum: int, image_windows: int = 0, normalisation: str = "imagenet") -> tuple[dict[str, np.ndarray], np.ndarray | None]:
+    """Run the observer on up to ``maximum`` test windows.
+ 
+    Returns per-window records (NumPy, one row per window) and, for the first
+    ``image_windows`` windows, the context + future frames as uint8 [M, T+F, H, W, 3].
+    """
     values: dict[str, list[np.ndarray]] = {}
+    images: list[np.ndarray] = []
     seen = 0
     for batch in loader:
         batch_size = len(batch["context_rgb"])
@@ -216,14 +259,25 @@ def _collect(module: SE3ObserverModule, loader, device: torch.device, maximum: i
             "rollout_linear_velocity_error": torch.linalg.vector_norm(next_v - device_batch["future_linear_velocity"][:, 0], dim=-1),
             "rollout_angular_velocity_error": torch.linalg.vector_norm(next_w - device_batch["future_angular_velocity"][:, 0], dim=-1),
             "time": device_batch["context_time"][:, -1],
+            **_sequence_tensors(prediction, device_batch),
         }
 
         for key, value in tensors.items():
-            values.setdefault(key, []).append(value[:keep].detach().cpu().numpy())
+            values.setdefault(key, []).append(value[:keep].detach().float().cpu().numpy())
 
         values.setdefault("trajectory_id", []).append(np.asarray(batch["trajectory_id"][:keep], dtype=str))
+
+        stored = sum(len(part) for part in images)
+        if stored < image_windows:
+            take = min(keep, image_windows - stored)
+            frames = torch.cat((batch["context_rgb"][:take], batch["future_rgb"][:take]), dim=1)
+            frames = denormalise_rgb(frames, normalisation) # [take, T+F, 3, H, W] in [0, 1]
+            images.append((frames.permute(0, 1, 3, 4, 2) * 255).round().to(torch.uint8).numpy())
+
         seen += keep
-    return {key: np.concatenate(parts, axis=0) for key, parts in values.items()}
+
+    records = {key: np.concatenate(parts, axis=0) for key, parts in values.items()}
+    return records, (np.concatenate(images, axis=0) if images else None)
 
 
 def _summary(records: dict[str, np.ndarray]) -> dict[str, Any]:
@@ -239,6 +293,8 @@ def _summary(records: dict[str, np.ndarray]) -> dict[str, Any]:
     for name in ("orientation_error_deg", "rollout_position_error", "rollout_orientation_error_deg", "rollout_linear_velocity_error", "rollout_angular_velocity_error"):
         value = records[name]
         summary[name] = {"mean": float(value.mean()), "median": float(np.median(value)), "p95": float(np.percentile(value, 95)), "maximum": float(value.max())}
+
+    summary["rollout_vs_horizon"] = horizon_statistics(records)
     return summary
 
 
@@ -255,11 +311,17 @@ def evaluate_kinematic_observer(
     training_config_path: str | Path,
     output_directory: str | Path,
     settings: EvaluationSettings = EvaluationSettings(),
+    rendering_config_path: str | Path | None = None,
 ) -> Path:
-    """Evaluate the current-state estimate (last context frame) and a one-step rollout."""
-    torch.manual_seed(settings.seed); np.random.seed(settings.seed)
+    """Evaluate the current-state estimate, whole-window estimates and rollouts.
+ 
+    With ``rendering_config_path`` (the project's rendering.yaml, which holds the camera) the rollouts are also drawn on the rendered frames.
+    """
+    torch.manual_seed(settings.seed)
+    np.random.seed(settings.seed)
     checkpoint_path, training_config_path, output = Path(checkpoint_path), Path(training_config_path), Path(output_directory)
     output.mkdir(parents=True, exist_ok=True)
+
     configuration = yaml.safe_load(training_config_path.read_text(encoding="utf-8"))
     data_config = DataConfig.from_yaml(Path(configuration["data_config"]))
     manifest = data_config.manifest_path or data_config.root / "manifest.parquet"
@@ -268,7 +330,12 @@ def evaluate_kinematic_observer(
     module = SE3ObserverModule.load_from_checkpoint(checkpoint_path, map_location="cpu")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     module.to(device).eval()
-    records = _collect(module, loader, device, settings.maximum_test_windows)
+    
+    image_windows = settings.trajectory_plots if rendering_config_path is not None else 0
+    records, images = _collect(
+        module, loader, device, settings.maximum_test_windows, image_windows, data_config.image.normalization
+    )
+    
     summary = _summary(records)
     summary["checkpoint"] = str(checkpoint_path.resolve())
     summary["training_config"] = str(training_config_path.resolve())
@@ -291,5 +358,12 @@ def evaluate_kinematic_observer(
     })
     _error_vs_magnitude(output / "linear_velocity_error_vs_speed.png", np.linalg.norm(records["true_linear_velocity"], axis=1), np.linalg.norm(records["pred_linear_velocity"]-records["true_linear_velocity"], axis=1), "True speed [m/s]", "Velocity error [m/s]")
     _error_vs_magnitude(output / "angular_velocity_error_vs_speed.png", np.linalg.norm(records["true_angular_velocity"], axis=1), np.linalg.norm(records["pred_angular_velocity"]-records["true_angular_velocity"], axis=1), "True angular speed [rad/s]", "Angular-velocity error [rad/s]")
-    _trajectory_plots(output / "trajectories", records, settings.trajectory_plots)
+
+    trajectory_window_plots(output / "trajectories", records, settings.trajectory_plots)
+
+    rollout_horizon_plot(output / "rollout_error_vs_horizon.png", records)
+    
+    if images is not None:
+        camera = PinholeCamera.from_rendering_config(rendering_config_path)
+        rollout_overlay_plots(output / "rollout_overlays", records, images, camera, settings.trajectory_plots, settings.ball_radius)
     return output

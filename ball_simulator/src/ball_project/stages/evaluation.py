@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ball_project.commands import executable, run_command
 from ball_project.discovery import ProjectContext
-from ball_project.effective_configs import effective_training_config
+from ball_project.effective_configs import effective_training_config, effective_render_config
 
 
 def find_best_checkpoint(context: ProjectContext) -> Path:
@@ -31,5 +31,7 @@ def evaluate_observer(context: ProjectContext, *, dry_run: bool = False) -> None
         str(effective_training_config(context)),
         "--output",
         str(context.resolve(context.manifest.paths.evaluation)),
+        "--rendering-config",
+        str(effective_render_config(context)),
     ]
     run_command(context, command, stage="evaluation", dry_run=dry_run)

@@ -236,9 +236,10 @@ __marimo__/
 #############################
 .vscode
 
-# Ignore folders
+# Ignore folders/files
 validation/ 
 rendered/
 ball_simulator/*.png
 ball_simulator/*.h5
 local_experiments/
+CLAUDE.md

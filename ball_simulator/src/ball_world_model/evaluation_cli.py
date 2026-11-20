@@ -28,7 +28,7 @@ def register_evaluation_command(app: typer.Typer) -> None:
             int,
             typer.Option("--maximum-test-windows", min=1),
         ] = 2_000,
-         maximum_probe_train_windows: Annotated[
+        maximum_probe_train_windows: Annotated[
             int,
             typer.Option("--maximum-probe-train-windows", min=10),
         ] = 5_000,
@@ -36,7 +36,18 @@ def register_evaluation_command(app: typer.Typer) -> None:
             int,
             typer.Option("--trajectory-plots", min=0),
         ] = 12,
-        seed: Annotated[int, typer.Option("--seed")] = 20260824,
+        seed: Annotated[
+            int, 
+            typer.Option("--seed"),
+        ] = 20260824,
+        rendering_config: Annotated[
+            Path | None,
+            typer.Option("--rendering-config", exists=True, file_okay=True, readable=True, help="rendering.yaml with the camera; enables the rollout overlays on the frames"),
+        ] = None,
+        ball_radius: Annotated[
+            float,
+            typer.Option("--ball_radius", min=0.0)
+        ] = 0.10,
     ) -> None:
         """Evaluate physical predictions, interventions, and layerwise probes."""
         saved = evaluate_kinematic_observer(
@@ -48,6 +59,8 @@ def register_evaluation_command(app: typer.Typer) -> None:
                 maximum_probe_train_windows=maximum_probe_train_windows,
                 trajectory_plots=trajectory_plots,
                 seed=seed,
+                ball_radius=ball_radius,
             ),
+            rendering_config_path=rendering_config,
         )
         print(f"[green]Saved observer evaluation:[/green] {saved}")
