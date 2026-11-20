@@ -93,7 +93,7 @@ class ObserverModelConfig(StrictModel):
     feature_channels: int = Field(default=128, ge=8)
     descriptor_dim: int = Field(default=256, ge=16)
     motion_dim: int = Field(default=128, ge=8)
-    temporal_layes: int = Field(default=2, ge=0)
+    temporal_layers: int = Field(default=2, ge=0)
     keypoints: int = Field(default=8, ge=2)
     keypoint_dim: int = Field(default=32, ge=4)
     default_dt: float = Field(default=0.01, gt=0.0)

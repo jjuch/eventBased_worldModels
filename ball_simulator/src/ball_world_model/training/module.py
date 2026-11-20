@@ -29,7 +29,7 @@ class SE3ObserverModule(L.LightningModule):
         targets = window_targets(batch)
         future = (
             future_targets(batch, self.loss_settings.rollout_steps)
-            if self.self.loss_settings.rollout > 0
+            if self.loss_settings.rollout > 0
             else None
         )
         total, components = observer_losses(
