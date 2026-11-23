@@ -178,13 +178,13 @@ def _rollout_from_first_frame(prediction: ObserverPrediction, horizons: torch.Te
 
 
 def _twist_difference_acceleration(rates: torch.Tensor, dt: torch.Tensor) -> torch.Tensor:
-    """Acceleration implied by neighbouring interval-mean velocities, [B, I-1, 3].
+    """Acceleration implied by neighbouring interval-mean velocities, [B, I-1, 3] in m/s² or rad/s².
 
     Baseline for the acceleration head: it needs no acceleration branch at all.
-    It estimates the acceleration at the inner frames 1..T-2.
+    Interval means sit at interval midpoints, so the time between two neighbouring means is the average of the two interval durations. The result estimates the acceleration at the inner frames 1..T-2.
     """
-    centre_dt = 0.5 * (dt[:, 1:] - dt[:, :-1]).unsqueeze(-1)
-    return (rates[:, 1:] - rates[:, :-1]) / centre_dt
+    midpoint_spacing = 0.5 * (dt[:, 1:] + dt[:, :-1]).unsqueeze(-1)
+    return (rates[:, 1:] - rates[:, :-1]) / midpoint_spacing
 
 
 def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
