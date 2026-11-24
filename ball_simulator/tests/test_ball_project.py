@@ -1,10 +1,15 @@
 from pathlib import Path
 
 import yaml
+import sys
+import pytest
 
 from ball_project.creator import create_project
-from ball_project.discovery import discover_project
+from ball_project.runs import create_run
+from ball_project.discovery import discover_project, load_project
 from ball_project.effective_configs import effective_data_config, effective_training_config
+from ball_project.commands import run_command
+
 
 
 def test_create_translation_project(tmp_path):
@@ -38,7 +43,7 @@ def test_effective_configs_inject_only_central_paths(tmp_path):
     original_training = (root / "configs/training.yaml").read_text(encoding="utf-8")
 
     data_path = effective_data_config(context)
-    training_path = effective_training_config(context)
+    training_path = effective_training_config(context, context.run())
     data = yaml.safe_load(data_path.read_text(encoding="utf-8"))
     training = yaml.safe_load(training_path.read_text(encoding="utf-8"))
 
@@ -68,3 +73,24 @@ def test_project_templates_do_not_share_mutable_config_files(tmp_path):
     first_config = first / "configs/trajectories.yaml"
     first_config.write_text(first_config.read_text() + "\n# local edit\n", encoding="utf-8")
     assert "# local edit" not in (second / "configs/trajectories.yaml").read_text()
+
+
+def test_run_command_logs_inside_run(tmp_path):
+    root = create_project("p", experiment_type="ball", subtype="free-flight",
+                          mode="translation", parent=tmp_path)
+    context = load_project(root)
+    run = context.run()
+    run_command(context, [sys.executable, "-c", "print('x')"], stage="training", run=run)
+    assert list((run.logs / "training").glob("*.log"))
+    assert list((run.root / "records").glob("*.json"))
+
+
+def test_run_lookup_requires_name_when_ambiguous(tmp_path):
+    root = create_project("p", experiment_type="ball", subtype="free-flight",
+                          mode="translation", parent=tmp_path)
+    context = load_project(root)
+    assert context.run().name == "default"
+    create_run(context, "second", from_run="default")
+    with pytest.raises(ValueError):
+        context.run()
+    assert context.run("second").training_config.is_file()

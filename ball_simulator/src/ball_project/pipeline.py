@@ -11,7 +11,8 @@ from .stages.ball import (
 )
 
 
-def run_pipeline(context: ProjectContext, *, dry_run: bool = False) -> None:
+def run_pipeline(context: ProjectContext, *, run_name: str | None = None, dry_run: bool = False) -> None:
+    run = context.run(run_name) # fail before any expensive stage is the run is ambiguous
     status = inspect_status(context)
     if status.trajectories is None:
         generate_trajectories(context, dry_run=dry_run)
@@ -21,4 +22,4 @@ def run_pipeline(context: ProjectContext, *, dry_run: bool = False) -> None:
         render(context, dry_run=dry_run)
     if not status.manifest_ready:
         build_manifest(context, dry_run=dry_run)
-    train(context, dry_run=dry_run)
+    train(context, run, dry_run=dry_run)

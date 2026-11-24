@@ -11,8 +11,9 @@ Two rollouts are shown:
     rollout from first frame:   starts at the estimate for frame 0 and runs open
         loop through the rest of the window and the future frames. It is longer
         (H steps), so it shows how estimation errors grow with the horizon.
-Each rollout is also repeated without acceleration (constant twist). The gap
-between the two is what the acceleration estimate contributes.
+Each rollout is also repeated with two baselines: without acceleration
+(constant twist) and with gravity only (a known physics prior). The gap to the
+gravity-only rollout is what the *learned* acceleration contributes.
 """
 
 from __future__ import annotations
@@ -59,6 +60,8 @@ def horizon_statistics(records: dict[str, np.ndarray]) -> dict[str, dict[str, li
             "orientation_error_deg": describe(records[f"{prefix}_orientation_error_deg"]),
             "no_acceleration_position_error_m": describe(records[f"{prefix}_no_acceleration_position_error"]),
             "no_acceleration_orientation_error_deg": describe(records[f"{prefix}_no_acceleration_orientation_error_deg"]),
+            "gravity_only_position_error_m": describe(records[f"{prefix}_gravity_only_position_error"]),
+            "gravity_only_orientation_error_deg": describe(records[f"{prefix}_gravity_only_orientation_error_deg"]),
         }
     return statistics
 
@@ -66,7 +69,8 @@ def horizon_statistics(records: dict[str, np.ndarray]) -> dict[str, dict[str, li
 def rollout_horizon_plot(path: Path, records: dict[str, np.ndarray]) -> None:
     """Rollout position and orientation error against the prediction horizon.
 
-    Dashed coloured lines repeat each rollout without acceleration. The dashed grey line is the median error of the per-frame estimates: the
+    Dashed coloured lines repeat each rollout without acceleration, dash-dotted
+    lines with gravity only. The dashed grey line is the median error of the per-frame estimates: the
     accuracy obtained by simply observing every frame. A rollout that stays close
     to it adds little error of its own.
     """
@@ -97,6 +101,8 @@ def rollout_horizon_plot(path: Path, records: dict[str, np.ndarray]) -> None:
             axis.plot(steps, np.asarray(entry[key]["p95"]) * scale, linestyle=":", color=colour, label=f"{text}: p95")
             axis.plot(steps, np.asarray(entry[f"no_acceleration_{key}"]["median"]) * scale, linestyle="--",
                       marker="s", markersize=3, color=colour, alpha=0.7, label=f"{text}: median, no acceleration")
+            axis.plot(steps, np.asarray(entry[f"gravity_only_{key}"]["median"]) * scale, linestyle="-.",
+                      marker="^", markersize=3, color=colour, alpha=0.7, label=f"{text}: median, gravity only")
         axis.axhline(observation_floor[key] * scale, color="grey", linestyle="--", label="per-frame estimate (median)")
         axis.axvline(context_frames - 0.5, color="black", linewidth=0.8)
         axis.annotate("first-frame rollout leaves\nthe observed window", (context_frames - 0.4, axis.get_ylim()[1] * 0.9),
@@ -184,12 +190,16 @@ def _window_figure(path: Path, index: int, records: dict[str, np.ndarray]) -> No
                        **STYLE_ROLLOUT_FIRST, label="from first frame, with acceleration")
     ablation_axis.plot(rollout_first_time, 1e3 * records["rollout_first_no_acceleration_position_error"][index],
                        color="tab:purple", linestyle="-", alpha=0.45, label="from first frame, constant twist")
+    ablation_axis.plot(rollout_first_time, 1e3 * records["rollout_first_gravity_only_position_error"][index],
+                       color="tab:purple", linestyle="-.", alpha=0.7, label="from first frame, gravity only")
+    ablation_axis.plot(future_time, 1e3 * records["rollout_current_gravity_only_position_error"][index],
+                       color="tab:red", linestyle="-.", alpha=0.7, label="from current state, gravity only")
     ablation_axis.plot(future_time, 1e3 * records["rollout_current_position_error"][index], color="tab:red",
                        **STYLE_ROLLOUT_CURRENT, label="from current state, with acceleration")
     ablation_axis.plot(future_time, 1e3 * records["rollout_current_no_acceleration_position_error"][index],
                        color="tab:red", linestyle="-", alpha=0.45, label="from current state, constant twist")
-    ablation_axis.set_title("Rollout position error [mm]: with vs without acceleration")
-    ablation_axis.legend(fontsize=8)
+    ablation_axis.set_title("Rollout position error [mm]: learned vs gravity-only vs no acceleration")
+    ablation_axis.legend(fontsize=7)
 
     # Error norms over time.
     frame_position_error = np.linalg.norm(records["pred_frame_position"][index] - records["true_frame_position"][index], axis=-1)
@@ -319,7 +329,9 @@ def rollout_overlay_plots(
     """Draw estimates and rollouts on the rendered frames, cropped around the true ball.
 
     images: uint8 [M, T + F, H, W, 3] for the first M windows (context then future frames).
-    Truth: black outline with filled markers. Per-frame estimate (context) and rollout from the current state (future): hollow markers and an orange or red outline. Rollout from the first frame: purple dotted outline.
+    Truth: black outline with filled markers. Per-frame estimate (context) and
+    rollout from the current state (future): hollow markers and an orange or red
+    outline. Rollout from the first frame: purple dotted outline.
     """
     output.mkdir(parents=True, exist_ok=True)
     context_frames = records["frame_time"].shape[1]

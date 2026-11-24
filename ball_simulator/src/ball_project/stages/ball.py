@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ball_project.commands import executable, run_command
-from ball_project.discovery import ProjectContext
+from ball_project.discovery import ProjectContext, RunContext
 from ball_project.effective_configs import (
     effective_data_config,
     effective_render_config,
@@ -123,11 +123,11 @@ def inspect_data(context: ProjectContext, *, dry_run: bool = False) -> None:
     run_command(context, command, stage="inspection", dry_run=dry_run)
 
 
-def train(context: ProjectContext, *, dry_run: bool = False) -> None:
+def train(context: ProjectContext, run: RunContext, *, dry_run: bool = False) -> None:
     command = [
         executable("ball_world_model"),
         "train-kinematic",
         "--config",
-        str(effective_training_config(context)),
+        str(effective_training_config(context, run)),
     ]
-    run_command(context, command, stage="training", dry_run=dry_run)
+    run_command(context, command, stage="training", run=run, dry_run=dry_run)

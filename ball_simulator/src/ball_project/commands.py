@@ -6,7 +6,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .discovery import ProjectContext
+from .discovery import ProjectContext, RunContext
 
 
 def executable(name: str) -> str:
@@ -26,9 +26,13 @@ def run_command(
     command: list[str],
     *,
     stage: str,
+    run: RunContext | None = None,
     dry_run: bool = False,
 ) -> None:
-    """Run a project stage while streaming and persistently logging output."""
+    """Run a project stage while streaming and persistently logging output.
+    
+    With ``run``, logs and the execution record go inside the run folder.
+    """
     printable = subprocess.list2cmdline(command)
     if dry_run:
         print(printable)
@@ -36,8 +40,9 @@ def run_command(
     started = datetime.now(timezone.utc)
     stamp = started.strftime("%Y%m%dT%H%M%S_%fZ")
     stage_name = _safe_stage_name(stage)
-    log_directory = context.root / "logs" / stage_name
-    record_directory = context.root / ".ball_project" / "records"
+    base = run.root if run is not None else context.root
+    log_directory = base / "logs" / stage_name
+    record_directory = base / "records" if run is not None else context.root / ".ball_project" / "records"
     log_directory.mkdir(parents=True, exist_ok=True)
     record_directory.mkdir(parents=True, exist_ok=True)
     log_path = log_directory / f"{stamp}.log"
@@ -64,7 +69,7 @@ def run_command(
         "completed_at": datetime.now(timezone.utc).isoformat(),
         "command": command,
         "return_code": return_code,
-        "log": str(log_path.relative_to(context.root)),
+        "log": str(log_path.relative_to(base)),
     }
     (record_directory / f"{stamp}_{stage_name}.json").write_text(
         json.dumps(record, indent=2), encoding="utf-8"

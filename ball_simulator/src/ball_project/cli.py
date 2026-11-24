@@ -9,6 +9,7 @@ from rich import print
 
 from .creator import create_project
 from .discovery import discover_project
+from .runs import create_run
 from .editor import edit_file
 from .menu import run_menu, show_status
 from .pipeline import run_pipeline
@@ -21,10 +22,23 @@ from .stages.ball import (
 )
 from .stages.evaluation import evaluate_observer
 from .derive import derive_project_hard_copy
+from .status import inspect_status
+
 
 app = typer.Typer(no_args_is_help=True, help="Create and run reproducible world-model experiment workspaces.")
 config_app = typer.Typer(help="Edit project-local scientific configurations.")
 app.add_typer(config_app, name="config")
+
+
+RunOption = Annotated[
+    str | None,
+    typer.Option(
+        "--run",
+        help="Run name. Optional when the project has exactly one run."
+    ),
+]
+runs_app = typer.Typer(help="Create and list training runs.")
+app.add_typer(runs_app, name="runs")
 
 
 @app.command("create")
@@ -67,12 +81,13 @@ def run_command() -> None:
 
 @app.command("pipeline")
 def pipeline_command(
+    run: RunOption = None,
     dry_run: Annotated[
         bool, 
         typer.Option("--dry-run")
     ] = False
 ) -> None:
-    run_pipeline(discover_project(), dry_run=dry_run)
+    run_pipeline(discover_project(), run_name=run, dry_run=dry_run)
 
 
 @app.command("trajectories")
@@ -131,12 +146,14 @@ def inspect_command(
 
 @app.command("train")
 def train_command(
+    run: RunOption = None,
     dry_run: Annotated[
         bool, 
         typer.Option("--dry-run")
     ] = False
 ) -> None:
-    train(discover_project(), dry_run=dry_run)
+    context = discover_project()
+    train(context, context.run(run), dry_run=dry_run)
 
 
 @config_app.command("edit")
@@ -145,6 +162,7 @@ def edit_command(
         str, 
         typer.Argument(help="trajectories, rendering, data, training, or project")
     ],
+    run: RunOption = None,
     editor: Annotated[
         str | None, 
         typer.Option("--editor")
@@ -157,7 +175,10 @@ def edit_command(
         "data": context.manifest.configs.data,
         "training": context.manifest.configs.training,
     }
-    path = context.manifest_path if config_name == "project" else context.resolve(mapping[config_name])
+    if config_name == "training" and run is not None:
+        path = context.run(run).training_config
+    else:
+        path = context.manifest_path if config_name == "project" else context.resolve(mapping[config_name])
     edit_file(path, editor)
 
 
@@ -171,13 +192,16 @@ def run_entrypoint() -> None:
 
 @app.command("evaluate")
 def evaluate_command(
+    run: RunOption = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run"),
     ] = False,
 ) -> None:
+    context = discover_project()
     evaluate_observer(
-        discover_project(),
+        context,
+        context.run(run),
         dry_run=dry_run,
     )
 
@@ -223,3 +247,27 @@ def derive_command(
     print(f"[green]Approximate copied size:[/green] {result.copied_gibibytes:.2f} GiB")
     print("Training, evaluation, logs, and runtime records start empty.")
     print(f"Next: cd {result.root.name} && ball_project config edit training")
+
+@runs_app.command("new")
+def runs_new_command(
+    name: Annotated[
+        str,
+        typer.Argument(help="Name of the new run."),
+    ],
+    from_run: Annotated[
+        str | None,
+        typer.Option(
+            "--from", 
+            help="Copy this run's config instead of configs/training.yaml."
+        )
+    ] = None,
+) -> None:
+    run = create_run(discover_project(), name, from_run=from_run)
+    print(f"[green]Created run:[/green] {run.root}")
+    print(f"Next: edit {run.training_config}, then ball_project train --run {name}")
+
+
+@runs_app.command("list")
+def runs_list_command() -> None:
+    for run in inspect_status(discover_project()).runs:
+        print(f"{run.name:30s} checkpoints={run.checkpoints:<3d} evaluated={'yes' if run.evaluated else 'no'}.")

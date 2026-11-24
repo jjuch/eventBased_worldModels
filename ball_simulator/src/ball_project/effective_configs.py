@@ -4,7 +4,7 @@ from pathlib import Path
 
 import yaml
 
-from .discovery import ProjectContext
+from .discovery import ProjectContext, RunContext
 
 
 def _read(path: Path) -> dict:
@@ -28,44 +28,14 @@ def effective_data_config(context: ProjectContext) -> Path:
     value["manifest_path"] = str(context.resolve(context.manifest.paths.manifest))
     return _write(context.root / ".ball_project/effective/data.yaml", value)
 
-def _active_camera(context: ProjectContext) -> tuple[list[float], list[float]]:
-    """Read the camera actually used for rendering this project.
 
-    Camera optimisation ultimately updates the project's active rendering
-    configuration. Training diagnostics must therefore derive their camera
-    basis from that effective rendering configuration, never from a template.
-    """
-    rendering_path = effective_render_config(context)
-    rendering = _read(rendering_path)
-    camera = rendering.get("camera")
-    if not isinstance(camera, dict):
-        raise ValueError(
-            f"Rendering configuration has no camera mapping: {rendering_path}"
-        )
-
-    location = camera.get("location")
-    target = camera.get("target")
-    if not (
-        isinstance(location, list)
-        and isinstance(target, list)
-        and len(location) == 3
-        and len(target) == 3
-    ):
-        raise ValueError(
-            "The active rendering camera must define three-dimensional "
-            f"location and target vectors: {rendering_path}"
-        )
-    return [float(value) for value in location], [float(value) for value in target]
-
-
-def effective_training_config(context: ProjectContext) -> Path:
-    source = context.resolve(context.manifest.configs.training)
-    value = _read(source)
+def effective_training_config(context: ProjectContext, run: RunContext) -> Path:
+    """Run's training.yaml with the shared data config and the run directory injected."""
+    value = _read(run.training_config)
     value["data_config"] = str(effective_data_config(context))
-    value.setdefault("training", {})["output_directory"] = str(
-        context.resolve(context.manifest.paths.training_outputs)
-    )
-    return _write(context.root / ".ball_project/effective/training.yaml", value)
+    value.setdefault("training", {})["output_directory"] = str(run.root)
+    return _write(run.effective_training_config, value)
+
 
 def effective_render_config(context: ProjectContext) -> Path:
     path = context.resolve(context.manifest.configs.rendering)

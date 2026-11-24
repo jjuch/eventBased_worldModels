@@ -33,7 +33,7 @@ def _prepared_source(tmp_path: Path) -> Path:
     reports.mkdir(parents=True, exist_ok=True)
     (reports / "camera.json").write_text('{"score": 1.0}\n', encoding="utf-8")
 
-    training = root / "outputs/training/checkpoints"
+    training = root / "runs/default/checkpoints"
     training.mkdir(parents=True, exist_ok=True)
     (training / "old.ckpt").write_bytes(b"must not be copied")
     records = root / ".ball_project/records"
@@ -58,7 +58,7 @@ def test_derive_makes_independent_hard_copy(tmp_path):
     assert (derived / "data/rendered/trajectory_00000000/_SUCCESS").is_file()
     assert (derived / "data/manifests/manifest.parquet").is_file()
     assert (derived / "reports/camera.json").is_file()
-    assert not list((derived / "outputs/training").rglob("*.ckpt"))
+    assert not list((derived / "runs/default").rglob("*.ckpt"))
     assert not list((derived / ".ball_project/records").glob("*.json"))
 
     # Prove there is no link or source dependency: modifying the derived copy leaves

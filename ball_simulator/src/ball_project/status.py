@@ -7,13 +7,21 @@ import yaml
 
 from .discovery import ProjectContext
 
+
+@dataclass(frozen=True, slots=True)
+class RunStatus:
+    name: str
+    checkpoints: int
+    evaluated: bool
+
+
 @dataclass(frozen=True, slots=True)
 class ProjectStatus:
     trajectories: int | None
     camera_ready: bool
     rendered_complete: int
     manifest_ready: bool
-    training_runs: int
+    runs: list[RunStatus]
     active_rendering_config: str
     camera_summary: str | None
 
@@ -41,19 +49,30 @@ def inspect_status(context: ProjectContext) -> ProjectStatus:
                 trajectory_count = len(handle.get("trajectories", {}))
         except OSError:
             trajectory_count = None
+            
     rendered = context.resolve(context.manifest.paths.rendered)
     rendered_complete = sum(1 for path in rendered.glob("trajectory_*/_SUCCESS"))
+
     camera_report = context.resolve(context.manifest.paths.camera_report)
+
     manifest = context.resolve(context.manifest.paths.manifest)
-    training = context.resolve(context.manifest.paths.training_outputs)
-    runs = len(list(training.glob("**/checkpoints/*.ckpt"))) if training.exists() else 0
+
+    runs = []
+    for name in context.run_names():
+        run = context.run(name)
+        runs.append(RunStatus(
+            name=name,
+            checkpoints=len(list(run.checkpoints.glob("*.ckpt"))),
+            evaluated=(run.evaluation / "metrics.json").is_file(),
+        ))
+
     active = context.resolve(context.manifest.configs.rendering)
     return ProjectStatus(
         trajectories=trajectory_count,
         camera_ready=camera_report.is_file(),
         rendered_complete=rendered_complete,
         manifest_ready=manifest.is_file(),
-        training_runs=runs,
+        runs=runs,
         active_rendering_config=str(active),
         camera_summary=_camera_summary(context),
     )

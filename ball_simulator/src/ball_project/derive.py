@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .discovery import ProjectContext, discover_project
+from .discovery import ProjectContext, discover_project, load_project, DEFAULT_RUN
+from .runs import create_run
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,14 +23,10 @@ class DeriveResult:
 
 
 _EMPTY_DIRECTORIES = (
-    "outputs/training",
-    "outputs/checkpoints",
-    "outputs/tensorboard",
-    "outputs/evaluation",
+    "runs",
     "outputs/inspection",
     "logs/trajectories",
     "logs/rendering",
-    "logs/training",
     ".ball_project/effective",
     ".ball_project/records",
 )
@@ -186,6 +183,7 @@ def derive_project_hard_copy(
             (destination / directory).mkdir(parents=True, exist_ok=True)
         _write_fresh_runtime_state(destination)
         _rewrite_project_manifest(source_context, destination, new_name=name)
+        create_run(load_project(destination), DEFAULT_RUN)
 
         source_readme = source_context.root / "README.md"
         if source_readme.is_file():

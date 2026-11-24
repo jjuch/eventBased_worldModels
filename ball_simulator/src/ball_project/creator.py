@@ -5,6 +5,8 @@ from pathlib import Path
 
 from .models import ExperimentInfo, ProjectManifest
 from .template_registry import definition, template_text
+from .discovery import DEFAULT_RUN, load_project
+from .runs import create_run
 
 
 INITIAL_DIRECTORIES = ("configs", ".ball_project")
@@ -55,6 +57,8 @@ def create_project(
             template_text(experiment_type, subtype, source), encoding="utf-8"
         )
 
+    create_run(load_project(root), DEFAULT_RUN)
+
     (root / "README.md").write_text(
         template_text(experiment_type, subtype, "PROJECT_README.md").replace(
             "{{PROJECT_NAME}}", name
@@ -63,7 +67,9 @@ def create_project(
     )
     (root / ".gitignore").write_text(
         "data/\noutputs/\nlogs/\nreports/*.json\n.ball_project/effective/\n"
-        ".ball_project/records/\nconfigs/generated/\n",
+        ".ball_project/records/\nconfigs/generated/\n"
+        "runs/*/checkpoints/\nruns/*/tensorboard/\nruns/*/evaluation/\n"
+        "runs/*/logs/\nruns/*/records/\nruns/*/effective/\n",
         encoding="utf-8",
     )
     (root / ".ball_project" / "state.json").write_text("{}\n", encoding="utf-8")
