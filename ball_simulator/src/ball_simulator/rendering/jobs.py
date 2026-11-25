@@ -8,6 +8,13 @@ import numpy as np
 
 from ball_simulator.trajectories.dataset_geometry import load_environment_geometry
 from ball_simulator.trajectories.visualization import load_trajectory, list_trajectory_ids
+from ball_simulator.trajectories.shapes import (
+    build_shape,
+    marker_layout,
+    render_body_description,
+    shape_config_from_dataset,
+    write_appearance,
+)
 
 from .config import RenderConfig
 from .resampling import resample_states
@@ -42,6 +49,13 @@ def prepare_render_job(
     state_path = job_directory / f"trajectory_{resolved_id}.npz"
     np.savez_compressed(state_path, **states)
 
+    ball = config.ball
+    shape = build_shape(shape_config_from_dataset(dataset), float(trajectory.parameters["radius"]))
+    markers = marker_layout(
+        shape, ball.marker_placement if ball.markers_enabled else "none", ball.marker_count
+    )
+    write_appearance(output_directory, shape, markers)
+
     surfaces = [
         {
             "surface_id": surface.surface_id,
@@ -56,7 +70,9 @@ def prepare_render_job(
         "trajectory_id": resolved_id,
         "state_npz": str(state_path),
         "output_directory": str(output_directory / f"trajectory_{resolved_id}"),
-        "radius": float(trajectory.parameters["radius"]),
+        "body": render_body_description(
+            shape, markers, ball.marker_angular_radius_degree, ball.marker_surface_offset,
+        ),
         "environment": {
             "kind": geometry.kind,
             "surface_ids": list(geometry.surface_ids),

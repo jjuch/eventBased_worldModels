@@ -19,8 +19,16 @@ def find_best_checkpoint(run: RunContext) -> Path:
     )
 
 
-def evaluate_observer(context: ProjectContext, run: RunContext, *, dry_run: bool = False) -> None:
-    checkpoint = find_best_checkpoint(run)
+def evaluate_observer(
+    context: ProjectContext, 
+    run: RunContext, 
+    *, 
+    checkpoint: Path | None = None,
+    dry_run: bool = False
+) -> None:
+    """Evaluate on this project's test split; ``checkpoint`` defaults to the run's best."""
+    checkpoint = Path(checkpoint) if checkpoint is not None else find_best_checkpoint(run)
+    
     command = [
         executable("ball_world_model"),
         "evaluate-kinematic",

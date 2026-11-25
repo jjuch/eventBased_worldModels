@@ -17,10 +17,12 @@ from ball_world_model.config import DataConfig
 from ball_world_model.data.dataset import RenderedTrajectoryDataset, build_dataloader
 from ball_world_model.data.transforms import denormalise_rgb
 from ball_world_model.geometry.se3 import propagate_world, rotation_angle, rollout_world
+from ball_world_model.geometry.symmetry import symmetric_rotation_angle
 from ball_world_model.models.state import ObserverPrediction
 from ball_world_model.training.module import SE3ObserverModule
 from ball_world_model.training.targets import quaternion_xyzw_to_matrix, window_targets
 from .plots import PinholeCamera, horizon_statistics, rollout_horizon_plot, rollout_overlay_plots, trajectory_window_plots
+
 
 
 
@@ -367,6 +369,42 @@ def _interval_acceleration_summary(records: dict[str, np.ndarray]) -> dict[str, 
     return summary
 
 
+# Written next to the renders by ball_simulator.trajectories.shapes.write_appearance.
+APPEARANCE_FILE = "appearance.json"
+
+
+def _describe(value: np.ndarray) -> dict[str, float]:
+    return {"mean": float(value.mean()), "median": float(np.median(value)),
+            "p95": float(np.percentile(value, 95)), "maximum": float(value.max())}
+
+
+def _symmetric_orientation_summary(records: dict[str, np.ndarray], symmetries: np.ndarray) -> dict[str, Any]:
+    """Orientation errors in deg that ignore rotations under which the body looks identical.
+
+    symmetries [G, 3, 3] body-frame rotations S; R and R S cannot be told apart in the images.
+    """
+    group = torch.from_numpy(symmetries)
+
+    def error_deg(true: np.ndarray, predicted: np.ndarray) -> np.ndarray:
+        angle = symmetric_rotation_angle(torch.from_numpy(true), torch.from_numpy(predicted), group)
+        return np.rad2deg(angle.numpy())
+
+    true_after_first = np.concatenate(
+        (records["true_frame_rotation"][:, 1:], records["true_future_rotation"]), axis=1
+    )
+    frames = error_deg(records["true_frame_rotation"], records["pred_frame_rotation"])
+    rollout_first = error_deg(true_after_first, records["rollout_first_rotation"])
+    rollout_current = error_deg(records["true_future_rotation"], records["rollout_current_rotation"])
+    return {
+        "symmetry_rotations": int(len(symmetries)),
+        "current": _describe(frames[:, -1]),
+        "all_frames": _describe(frames),
+        "rollout_from_first_frame_median_vs_horizon": np.median(rollout_first, axis=0).tolist(),
+        "rollout_from_current_state_median_vs_horizon": np.median(rollout_current, axis=0).tolist(),
+    }
+
+
+
 def _write_window_csv(path: Path, records: dict[str, np.ndarray]) -> None:
     fields = ["trajectory_id", "time", "orientation_error_deg", "rollout_position_error", "rollout_orientation_error_deg", "rollout_linear_velocity_error", "rollout_angular_velocity_error"]
     with path.open("w", newline="", encoding="utf-8") as handle:
@@ -408,6 +446,17 @@ def evaluate_kinematic_observer(
     summary = _summary(records)
     summary["checkpoint"] = str(checkpoint_path.resolve())
     summary["training_config"] = str(training_config_path.resolve())
+
+    appearance_path = Path(data_config.root) / APPEARANCE_FILE
+    if appearance_path.is_file():
+        symmetries = json.loads(appearance_path.read_text(encoding="utf-8"))["symmetry_rotations"]
+        if symmetries is None:
+            summary["orientation_observable"] = False
+        elif len(symmetries) > 1:
+            summary["symmetric_orientation_error_deg"] = _symmetric_orientation_summary(
+                records, np.asarray(symmetries, dtype=np.float32)
+            )
+            
     _save_json(output / "metrics.json", summary)
     _write_window_csv(output / "window_errors.csv", records)
 

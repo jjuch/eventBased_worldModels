@@ -8,7 +8,7 @@ from tqdm import trange
 from .config import ExperimentConfig
 from .environments import EnvironmentFactory, EnvironmentKind
 from .sampling import InitialStateSamplerFactory, ParameterSampler
-from .simulator import BallSimulator
+from .backends import create_simulator
 from .storage import HDF5TrajectoryWriter
 from .parallel import generate_parallel_dataset
 
@@ -34,7 +34,7 @@ class DatasetGenerator:
                 config, self.environment, self.rng,
             )
         )
-        self.simulator = BallSimulator(config.simulation, self.environment)
+        self.simulator = create_simulator(config, self.environment)
 
 
     def generate(self, output: str | Path | None = None) -> Path:

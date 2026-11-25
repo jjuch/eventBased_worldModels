@@ -21,13 +21,13 @@ from .environments import (
     SimulationEnvironment,
 )
 from .sampling import InitialStateSamplerFactory, ParameterSampler
-from .simulator import BallSimulator
+from .backends import create_simulator
 from .storage import HDF5TrajectoryWriter
 from .trajectory import Trajectory
 
 _WORKER_CONFIG: ExperimentConfig | None = None
 _WORKER_ENVIRONMENT: SimulationEnvironment | None = None
-_WORKER_SIMULATOR: BallSimulator | None = None 
+_WORKER_SIMULATOR = None # BallSimulator or MujocoSimulator, see backends.create_simulator
 
 def recommended_simulation_workers() -> int:
     """Conservative automatic CPU worker count."""
@@ -53,8 +53,8 @@ def _initialize_simulation_worker(
     _WORKER_CONFIG = ExperimentConfig.model_validate(serialized_config)
     environment_kind = EnvironmentKind(environment_value)
     _WORKER_ENVIRONMENT = EnvironmentFactory.create(environment_kind, _WORKER_CONFIG)
-    _WORKER_SIMULATOR = BallSimulator(
-        _WORKER_CONFIG.simulation,
+    _WORKER_SIMULATOR = create_simulator(
+        _WORKER_CONFIG,
         _WORKER_ENVIRONMENT,
     )
 

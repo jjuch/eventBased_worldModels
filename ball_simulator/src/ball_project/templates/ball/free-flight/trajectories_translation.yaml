@@ -15,7 +15,10 @@ environments:
       point: [0.0, 0.0, -1.5]
       normal: [0.0, 0.0, 1.0]
 
-# Fixed ball and material parameters. Only initial state varies.
+shape:
+  kind: sphere        # sphere | cube | box | pyramid | tetrahedron
+  dimensions: [0.10, 0.10, 0.10]
+
 physics:
   mass: {low: 0.20, high: 0.20}
   radius: {low: 0.10, high: 0.10}
@@ -43,6 +46,7 @@ free_flight_initial_state:
   maximum_sampling_attempts: 1000
 
 simulation:
+  backend: mujoco 
   duration: 0.30
   internal_dt: 0.001
   observation_dt: 0.01

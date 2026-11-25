@@ -193,6 +193,15 @@ def run_entrypoint() -> None:
 @app.command("evaluate")
 def evaluate_command(
     run: RunOption = None,
+    checkpoint: Annotated[
+        Path | None,
+        typer.Option(
+            "--checkpoint",
+            exists=True,
+            dir_okay=False,
+            help="Evaluate this checkpoint (e.g. trained in another project) instead of the run's best.",
+        ),
+    ] = None,
     dry_run: Annotated[
         bool,
         typer.Option("--dry-run"),
@@ -202,6 +211,7 @@ def evaluate_command(
     evaluate_observer(
         context,
         context.run(run),
+        checkpoint=checkpoint,
         dry_run=dry_run,
     )
 

@@ -22,6 +22,44 @@ class Range(BaseModel):
         return self
 
 
+class ShapeConfig(BaseModel):
+    """Rigid-body geometry, built by trajectories/shapes.py.
+
+    ``dimensions`` are bounding-box extents in m along body x, y, z:
+    sphere       ignored; the radius is physics.radius
+    cube         three equal extents
+    box          any extents
+    pyramid      rectangular base dimensions[0] x dimensions[1], apex at height dimensions[2]
+    tetrahedron  regular, on alternate corners of a cube with three equal extents
+    """
+
+    kind: Literal["sphere", "cube", "box", "pyramid", "tetrahedron"] = "sphere"
+    dimensions: tuple[float, float, float] = (0.16, 0.16, 0.16)
+
+    @model_validator(mode="after")
+    def valid_dimensions(self) -> "ShapeConfig":
+        if min(self.dimensions) <= 0.0:
+            raise ValueError("Shape dimensions must be positive.")
+        
+        if self.kind in ("cube", "tetrahedron") and len(set(self.dimensions)) != 1:
+            raise ValueError(f"A {self.kind} needs three equal dimensions.")
+        
+        return self
+
+
+class MujocoConfig(BaseModel):
+    """MuJoCo integration and soft-contact settings (see MuJoCo docs: solref, solimp, condim)."""
+
+    integrator: Literal["Euler", "implicitfast", "RK4"] = "RK4"
+    contact_time_constant: float = Field(default=0.005, gt=0.0)  # s, solref[0]
+    contact_damping_ratio: float = Field(default=1.0, gt=0.0)  # solref[1]; below 1 is bouncier
+    solimp: tuple[float, float, float, float, float] = (0.9, 0.95, 0.001, 0.5, 2.0)
+    contact_dimension: Literal[1, 3, 4, 6] = 3
+    torsional_friction: float = Field(default=0.005, ge=0.0)
+    rolling_friction: float = Field(default=0.0001, ge=0.0)
+
+
+
 class PhysicsRanges(BaseModel):
     mass: Range = Range(low=0.1, high=0.5)
     radius: Range = Range(low=0.04, high=0.08)
@@ -69,16 +107,26 @@ class SimulationConfig(BaseModel):
     high_rate_dt: float | None = Field(default=None, gt=0)
     gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)
     penetration_tolerance: float = Field(default=1e-12, ge=0)
+    backend: Literal["native", "mujoco"] = "mujoco"
+    mujoco: MujocoConfig = MujocoConfig()
 
     @model_validator(mode="after")
     def compatible_steps(self) -> "SimulationConfig":
         ratio = self.observation_dt / self.internal_dt
         if abs(ratio - round(ratio)) > 1e-9:
             raise ValueError("observation_dt must be an integer multiple of internal_dt")
+        
         if self.high_rate_dt is not None:
             ratio = self.high_rate_dt / self.internal_dt
             if abs(ratio - round(ratio)) > 1e-9:
                 raise ValueError("high_rate_dt must be an integer multiple of internal_dt")
+
+        if self.backend == "mujoco" and self.mujoco.contact_time_constant < 2.0 * self.internal_dt:
+            raise ValueError(
+                "mujoco.contact_time_constant must be at least 2 times internal_dt. "
+                "MuJoCo would otherwise silently soften the contact."
+            )
+        
         return self
 
 
@@ -256,6 +304,33 @@ class ExperimentConfig(BaseModel):
     )
     simulation: SimulationConfig = SimulationConfig()
     dataset: DatasetConfig = DatasetConfig()
+    shape: ShapeConfig = ShapeConfig()
+
+    @model_validator(mode="after")
+    def shape_supported(self) -> "ExperimentConfig":
+        if self.shape.kind == "sphere":
+            return self
+
+        if self.simulation.backend != "mujoco":
+            raise ValueError(
+                "Non-spherical shapes need simulation.backend: mujoco. "
+                "The native simulator models spheres only."
+            )
+
+        aerodynamic = (
+            self.physics.drag_coefficient,
+            self.physics.magnus_coefficient,
+            self.physics.rotational_drag,
+        )
+        if any(spec.low != 0.0 or spec.high != 0.0 for spec in aerodynamic):
+            raise ValueError(
+                "Drag, Magnus and rotational drag use sphere formulas. "
+                "Set them to zero for non-spherical shapes."
+            )
+
+        return self
+
+    
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ExperimentConfig":

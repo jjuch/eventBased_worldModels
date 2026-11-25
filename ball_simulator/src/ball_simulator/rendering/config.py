@@ -57,6 +57,10 @@ class BallRenderConfig(BaseModel):
     markers_enabled: bool = True
     marker_angular_radius_degree: float = Field(default=13.0, gt=1.0, lt=45.0)
     marker_surface_offset: float = Field(default=0.003, ge=0.0)
+    # tetrahedral: the original ball's four directions (alternate corners of a cube).
+    # vertices: every corner of a polyhedron. marker_count keeps the first N markers.
+    marker_placement: Literal["tetrahedral", "vertices"] = "tetrahedral"
+    marker_count: int | None = Field(default=None, ge=1)
 
 
 class RenderConfig(BaseModel):

@@ -12,6 +12,7 @@ from .environments import (
     UBoxEnvironment,
     FreeFlightEnvironment,
 )
+from .shapes import build_shape
 
 
 def sample_range(spec: Range, rng: np.random.Generator) -> float:
@@ -32,6 +33,7 @@ def sample_angular_velocity(
         ],
         dtype=float,
     )
+
 
 class InitialStateSampler(ABC):
     def __init__(
@@ -385,6 +387,9 @@ class ParameterSampler:
         k_n = sample_range(p.normal_stiffness, self.rng)
         mass = sample_range(p.mass, self.rng)
         radius = sample_range(p.radius, self.rng)
+        if self.config.shape.kind != "sphere":
+            # For other shapes ``radius`` is the bounding radius, so wall placement and clearance checks stay conservative. The sample above keeps the RNG stream unchanged.
+            radius = build_shape(self.config.shape, radius).bounding_radius
         k_t = sample_range(p.tangential_stiffness_ratio, self.rng) * k_n
         # Relative to critical damping of the translational modes.
         c_t = sample_range(p.tangential_damping_ratio, self.rng) * 2.0 * np.sqrt(mass * k_t)

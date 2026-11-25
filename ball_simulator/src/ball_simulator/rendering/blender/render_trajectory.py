@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import subprocess
 import sys
 from pathlib import Path
@@ -14,30 +13,6 @@ from typing import Sequence
 import bpy
 import numpy as np
 from mathutils import Vector
-
-TETRAHEDRAL_DIRECTIONS = np.asarray(
-    [
-        [1.0, 1.0, 1.0],
-        [1.0, -1.0, -1.0],
-        [-1.0, 1.0, -1.0],
-        [-1.0, -1.0, 1.0],
-    ],
-    dtype=float,
-)
-
-TETRAHEDRAL_DIRECTIONS /= np.linalg.norm(
-    TETRAHEDRAL_DIRECTIONS,
-    axis=1,
-    keepdims=True,
-)
-
-
-MARKER_COLORS = (
-    (0.90, 0.05, 0.25, 1.0),  # Red
-    (0.05, 0.25, 0.95, 1.0),  # Blue
-    (0.05, 0.80, 0.20, 1.0),  # Green
-    (0.95, 0.95, 0.05, 1.0),  # Yellow
-)
 
 SEMANTIC_INDEX = {
     "background": 0,
@@ -732,7 +707,7 @@ def environment_signature(job: dict) -> str:
 
 def ball_signature(job: dict) -> str:
     payload = {
-        "radius": float(job["radius"]),
+        "body": float(job["body"]),
         "ball": job["render"]["ball"],
     }
 
@@ -1129,11 +1104,25 @@ def remove_object_and_mesh(obj) -> None:
 
 
 def setup_ball(job: dict):
-    radius = float(job["radius"])
+    """Build the body and its marker spheres from job["body"] (body frame, m)."""
+    body = float(job["body"])
     config = job["render"]["ball"]
 
-    bpy.ops.mesh.primitive_uv_sphere_add(segments=64, ring_count=32, radius=radius, location=(0.0, 0.0, 0.0))
-    ball = bpy.context.object
+    if body["sphere_radius"] is not None:
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=64, ring_count=32, radius=float(body["sphere_radius"]), location=(0.0, 0.0, 0.0))
+        ball = bpy.context.object
+        bpy.ops.object.shade_smooth()
+    else:
+        # Polyhedra keep flat shading so their edges and corners stay visible.
+        mesh = bpy.data.meshes.new("Ball")
+        mesh.from_pydata(
+            [tuple(vertex) for vertex in body["vertices"]], [], [tuple(face) for face in body["faces"]]
+        )
+        mesh.update()
+        ball = bpy.data.objects.new("Ball", mesh)
+        bpy.context.scene.collection.objects.link(ball)
+
     ball.name = "Ball"
     ball.rotation_mode = "QUATERNION"
     ball.data.materials.append(
@@ -1144,38 +1133,24 @@ def setup_ball(job: dict):
         )
     )
     ball.pass_index = 1
-    bpy.ops.object.shade_smooth()
 
     markers = []
 
-    if config["markers_enabled"]:
-        angular_radius = math.radians(
-            float(config["marker_angular_radius_degree"])
+    for index, marker_spec in enumerate(body["markers"]):
+        bpy.ops.mesh.primitive_uv_sphere_add(
+            segments=24,
+            ring_count=12,
+            radius=float(body["marker_radius"]),
+            location=(0.0, 0.0, 0.0),
         )
-        marker_radius = radius * math.sin(angular_radius)
-        center_distance= (
-            radius + float(config["marker_surface_offset"])
-            - 0.5 * marker_radius
-        )
-
-        for index, (direction, color) in enumerate(zip(
-            TETRAHEDRAL_DIRECTIONS, MARKER_COLORS, strict=True,
-        )):
-            bpy.ops.mesh.primitive_uv_sphere_add(
-                segments=24,
-                ring_count=12,
-                radius=marker_radius,
-                location=(0.0, 0.0, 0.0),
-            )
-            marker = bpy.context.object
-            marker.name = f"BallMarker_{index}"
-            marker.parent = ball
-            marker.location = tuple(direction * center_distance)
-            marker.pass_index = 1
-            marker.data.materials.append(marker_material(index, color))
-
-            bpy.ops.object.shade_smooth()
-            markers.append(marker)
+        marker = bpy.context.object
+        marker.name = f"BallMarker_{index}"
+        marker.parent = ball
+        marker.location = tuple(marker_spec["centre"])
+        marker.pass_index = 1
+        marker.data.materials.append(marker_material(index, tuple(marker_spec["color"])))
+        bpy.ops.object.shade_smooth()
+        markers.append(marker)
     return ball, markers
 
 
