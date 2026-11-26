@@ -33,6 +33,7 @@ class EvaluationSettings:
     trajectory_plots: int = 12
     seed: int = 20260824
     ball_radius: float = 0.10 # m, only used to draw the ball in the overlay figures
+    gravity: tuple[float, float, float] = (0.0, 0.0, -9.81) # m/s², world frame; physics prior for the gravity-only baseline
 
 def _to_device(batch: dict[str, Any], device: torch.device) -> dict[str, Any]:
     return {key: value.to(device) if torch.is_tensor(value) else value for key, value in batch.items()}
@@ -112,6 +113,7 @@ def _component_scatter(path: Path, prediction: np.ndarray, target: np.ndarray, n
     labels = ("x", "y", "z")
     metrics = _regression_metrics(prediction, target)
     figure, axes = plt.subplots(1, 3, figsize=(15, 4.6), constrained_layout=True)
+    figure.suptitle(name)
     for axis, component in zip(axes, range(3), strict=True):
         x, y = target[:, component], prediction[:, component]
         axis.scatter(x, y, s=10, alpha=0.55)
@@ -119,7 +121,7 @@ def _component_scatter(path: Path, prediction: np.ndarray, target: np.ndarray, n
         axis.plot([low, high], [low, high], color="black", linewidth=1.5)
         rmse_text = _format_metric(metrics["rmse"][component], ".4g")
         r2_text = _format_metric(metrics["r2"][component], ".3f")
-        axis.set_title(f"{name} {labels[component]}: RMSE={rmse_text}, R²={r2_text}")
+        axis.set_title(f"{labels[component]}: RMSE={rmse_text}, R²={r2_text}")
         axis.set_xlabel(f"True [{unit}]")
         axis.set_ylabel(f"Predicted [{unit}]")
         axis.grid(alpha=0.25)
@@ -158,22 +160,36 @@ def _error_vs_magnitude(path: Path, magnitude: np.ndarray, error: np.ndarray, x_
     figure.savefig(path, dpi=180); plt.close(figure)
 
 
-def _rollout_from_first_frame(prediction: ObserverPrediction, horizons: torch.Tensor, use_acceleration: bool = True) -> tuple[torch.Tensor, torch.Tensor]:
+def _rollout_from_first_frame(
+    prediction: ObserverPrediction, 
+    horizons: torch.Tensor,
+    acceleration_model: str = "predicted",
+    gravity: torch.Tensor | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Open-loop rollout from the frame-0 estimate. horizons [B, H] in s since frame 0.
 
-    Without acceleration the first interval-mean twist is held constant (the
-    constant-velocity baseline).
+    acceleration_model:
+        "predicted"  learned linear and angular acceleration of the first interval,
+        "gravity"    known gravity as linear acceleration, no angular acceleration,
+        "none"       constant twist (the first interval-mean twist is held).
+    ``gravity`` is a [B, 3] tensor and is only needed for "gravity".
     """
     poses, twists = prediction.frame_poses, prediction.interval_twists
     accelerations, half_step = prediction.interval_accelerations, 0.5 * prediction.interval_dt[:, :1]
-    if use_acceleration:
+    if acceleration_model == "predicted":
         # The first interval mean sits half a step after frame 0; step back to the instant of frame 0.
         linear = twists.linear[:, 0] - half_step * accelerations.linear[:, 0]
         angular = twists.angular[:, 0] - half_step * accelerations.angular[:, 0]
         linear_acceleration, angular_acceleration = accelerations.linear[:, 0], accelerations.angular[:, 0]
-    else:
+    elif acceleration_model == "gravity":
+        linear = twists.linear[:, 0] - half_step * gravity
+        angular = twists.angular[:, 0]
+        linear_acceleration, angular_acceleration = gravity, torch.zeros_like(angular)
+    elif acceleration_model == "none":
         linear, angular = twists.linear[:, 0], twists.angular[:, 0]
         linear_acceleration, angular_acceleration = torch.zeros_like(linear), torch.zeros_like(angular)
+    else:
+        raise ValueError(f"Unknown acceleration_model: {acceleration_model!r}.")
     return rollout_world(
         poses.position[:, 0], poses.rotation[:, 0], linear, angular, linear_acceleration, angular_acceleration, horizons,
     )
@@ -189,7 +205,7 @@ def _twist_difference_acceleration(rates: torch.Tensor, dt: torch.Tensor) -> tor
     return (rates[:, 1:] - rates[:, :-1]) / midpoint_spacing
 
 
-def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Tensor], gravity: tuple[float, float, float]) -> dict[str, torch.Tensor]:
     """Whole-window estimates and both rollouts, for the window and rollout figures."""
     targets = window_targets(batch)
     context_time, future_time = batch["context_time"].float(), batch["future_time"].float()
@@ -209,11 +225,24 @@ def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Ten
         zero, zero, current_horizon,
     )
 
+    # Gravity-only baseline: the known physics prior, without any learned acceleration.
+    # The current velocity is the last interval mean advanced half a step by gravity.
+    gravity_vector = torch.tensor(gravity, dtype=state.twist.linear.dtype, device=state.twist.linear.device).expand_as(state.twist.linear)
+    last_half_step = 0.5 * prediction.interval_dt[:, -1:]
+    current_position_gravity, current_rotation_gravity = rollout_world(
+        state.pose.position, state.pose.rotation,
+        prediction.interval_twists.linear[:, -1] + last_half_step * gravity_vector,
+        prediction.interval_twists.angular[:, -1],
+        gravity_vector, zero, current_horizon,
+    )
+
     first_horizon = torch.cat((context_time[:, 1:], future_time), dim=1) - context_time[:, :1]
     first_position, first_rotation = _rollout_from_first_frame(prediction, first_horizon)
-
     first_position_no_acceleration, first_rotation_no_acceleration = _rollout_from_first_frame(
-        prediction, first_horizon, use_acceleration=False
+        prediction, first_horizon, acceleration_model="none"
+    )
+    first_position_gravity, first_rotation_gravity = _rollout_from_first_frame(
+        prediction, first_horizon, acceleration_model="gravity", gravity=gravity_vector,
     )
 
     true_position_after_first = torch.cat((targets.frame_position[:, 1:], future_position), dim=1)
@@ -254,6 +283,8 @@ def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Ten
         "rollout_current_orientation_error_deg": torch.rad2deg(rotation_angle(future_rotation, current_rotation)),
         "rollout_current_no_acceleration_position_error": torch.linalg.vector_norm(current_position_no_acceleration - future_position, dim=-1),
         "rollout_current_no_acceleration_orientation_error_deg": torch.rad2deg(rotation_angle(future_rotation, current_rotation_no_acceleration)),
+        "rollout_current_gravity_only_position_error": torch.linalg.vector_norm(current_position_gravity - future_position, dim=-1),
+        "rollout_current_gravity_only_orientation_error_deg": torch.rad2deg(rotation_angle(future_rotation, current_rotation_gravity)),
         "rollout_first_horizon": first_horizon,
         "rollout_first_position": first_position,
         "rollout_first_rotation": first_rotation,
@@ -261,10 +292,12 @@ def _sequence_tensors(prediction: ObserverPrediction, batch: dict[str, torch.Ten
         "rollout_first_orientation_error_deg": torch.rad2deg(rotation_angle(true_rotation_after_first, first_rotation)),
         "rollout_first_no_acceleration_position_error": torch.linalg.vector_norm(first_position_no_acceleration - true_position_after_first, dim=-1),
         "rollout_first_no_acceleration_orientation_error_deg": torch.rad2deg(rotation_angle(true_rotation_after_first, first_rotation_no_acceleration)),
+        "rollout_first_gravity_only_position_error": torch.linalg.vector_norm(first_position_gravity - true_position_after_first, dim=-1),
+        "rollout_first_gravity_only_orientation_error_deg": torch.rad2deg(rotation_angle(true_rotation_after_first, first_rotation_gravity)),
     }
 
 @torch.inference_mode()
-def _collect(module: SE3ObserverModule, loader, device: torch.device, maximum: int, image_windows: int = 0, normalisation: str = "imagenet") -> tuple[dict[str, np.ndarray], np.ndarray | None]:
+def _collect(module: SE3ObserverModule, loader, device: torch.device, maximum: int, image_windows: int = 0, normalisation: str = "imagenet", gravity: tuple[float, float, float] = (0.0, 0.0, -9.81)) -> tuple[dict[str, np.ndarray], np.ndarray | None]:
     """Run the observer on up to ``maximum`` test windows.
  
     Returns per-window records (NumPy, one row per window) and, for the first
@@ -306,7 +339,7 @@ def _collect(module: SE3ObserverModule, loader, device: torch.device, maximum: i
             "rollout_linear_velocity_error": torch.linalg.vector_norm(next_v - device_batch["future_linear_velocity"][:, 0], dim=-1),
             "rollout_angular_velocity_error": torch.linalg.vector_norm(next_w - device_batch["future_angular_velocity"][:, 0], dim=-1),
             "time": device_batch["context_time"][:, -1],
-            **_sequence_tensors(prediction, device_batch),
+            **_sequence_tensors(prediction, device_batch, gravity),
         }
 
         for key, value in tensors.items():
@@ -443,7 +476,7 @@ def evaluate_kinematic_observer(
     
     image_windows = settings.trajectory_plots if rendering_config_path is not None else 0
     records, images = _collect(
-        module, loader, device, settings.maximum_test_windows, image_windows, data_config.image.normalization
+        module, loader, device, settings.maximum_test_windows, image_windows, data_config.image.normalization, settings.gravity,
     )
     
     summary = _summary(records)
