@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 from ball_project.commands import executable, run_command
 from ball_project.discovery import ProjectContext, RunContext, DatasetContext
 from ball_project.effective_configs import (
@@ -16,10 +18,11 @@ from ball_project.render_config import (
 from ball_project.runs import record_training_dataset
 
 def generate_trajectories(context: ProjectContext, dataset: DatasetContext, *, dry_run: bool = False) -> None:
+    """Simulate the dataset's trajectories; a failed run leaves no partial file behind."""
     command = [
         executable("ball_simulator"),
         "generate",
-        str(dataset.rendering_config),
+        str(dataset.trajectories_config),
         "--environment",
         "free-flight",
         "--output",
@@ -27,7 +30,11 @@ def generate_trajectories(context: ProjectContext, dataset: DatasetContext, *, d
         "--workers",
         str(context.manifest.runtime.simulation_workers),
     ]
-    run_command(context, command, stage="trajectories", scope=dataset, dry_run=dry_run)
+    try:
+        run_command(context, command, stage="trajectories", scope=dataset, dry_run=dry_run)
+    except subprocess.CalledProcessError:
+        dataset.trajaectories.unlink(missing_ok=True)
+        raise
 
 
 def propose_camera(context: ProjectContext, dataset: DatasetContext, *, dry_run: bool = False) -> None:
