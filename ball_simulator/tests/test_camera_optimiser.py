@@ -89,7 +89,7 @@ def test_project_templates_define_camera_optimisation_settings(
         mode=mode,
         parent=tmp_path,
     )
-    settings = load_camera_omtimisation_settings(discover_project(root))
+    settings = load_camera_omtimisation_settings(discover_project(root).dataset())
     assert settings.minimum_diameter_px == minimum
     assert settings.target_diameter_px == target
 
@@ -102,13 +102,13 @@ def test_user_changes_are_loaded_from_rendering_yaml(tmp_path):
         mode="translation",
         parent=tmp_path,
     )
-    rendering = root / "configs/rendering.yaml"
+    rendering = root / "datasets/default/configs/rendering.yaml"
     value = yaml.safe_load(rendering.read_text(encoding="utf-8"))
     value["camera_optimisation_settings"]["minimum_diameter_px"] = 22.0
     value["camera_optimisation_settings"]["target_diameter_px"] = 55.0
     rendering.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
 
-    settings = load_camera_omtimisation_settings(discover_project(root))
+    settings = load_camera_omtimisation_settings(discover_project(root).dataset())
     assert settings.minimum_diameter_px == 22.0
     assert settings.target_diameter_px == 55.0
 
@@ -122,7 +122,7 @@ def test_camera_application_preserves_optimisation_settings(tmp_path):
         parent=tmp_path,
     )
     context = discover_project(root)
-    authoritative = root / "configs/rendering.yaml"
+    authoritative = root / "datasets/default/configs/rendering.yaml"
     before = yaml.safe_load(authoritative.read_text(encoding="utf-8"))
     proposal = root / ".ball_project/effective/proposal.yaml"
     proposed = dict(before)
@@ -135,7 +135,7 @@ def test_camera_application_preserves_optimisation_settings(tmp_path):
     proposal.parent.mkdir(parents=True, exist_ok=True)
     proposal.write_text(yaml.safe_dump(proposed, sort_keys=False), encoding="utf-8")
 
-    apply_proposed_camera(context, proposal)
+    apply_proposed_camera(context.dataset(), proposal)
     after = yaml.safe_load(authoritative.read_text(encoding="utf-8"))
     assert (
         after["camera_optimisation_settings"]

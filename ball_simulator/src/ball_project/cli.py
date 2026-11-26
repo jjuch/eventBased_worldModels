@@ -8,27 +8,35 @@ import typer
 from rich import print
 
 from .creator import create_project
+from .datasets import create_dataset
+from .derive import derive_project_hard_copy
 from .discovery import discover_project
-from .runs import create_run
 from .editor import edit_file
 from .menu import run_menu, show_status
-from .pipeline import run_pipeline
+from .pipeline import run_pipeline, prepare_dataset
+from .report import write_comparison
+from .runs import create_run
 from .stages.ball import (
     build_manifest,
     generate_trajectories,
-    inspect_data, propose_camera, 
+    inspect_data, 
+    propose_camera, 
     render,
     train,
 )
 from .stages.evaluation import evaluate_observer
-from .derive import derive_project_hard_copy
 from .status import inspect_status
 
 
-app = typer.Typer(no_args_is_help=True, help="Create and run reproducible world-model experiment workspaces.")
+app = typer.Typer(
+    no_args_is_help=True, help="Create and run reproducible world-model experiment workspaces.")
 config_app = typer.Typer(help="Edit project-local scientific configurations.")
 app.add_typer(config_app, name="config")
 
+runs_app = typer.Typer(help="Create and list training runs.")
+app.add_typer(runs_app, name="runs")
+datasets_app = typer.Typer(help="Create and list datasets.")
+app.add_typer(datasets_app, name="datasets")
 
 RunOption = Annotated[
     str | None,
@@ -37,8 +45,11 @@ RunOption = Annotated[
         help="Run name. Optional when the project has exactly one run."
     ),
 ]
-runs_app = typer.Typer(help="Create and list training runs.")
-app.add_typer(runs_app, name="runs")
+DatasetOption = Annotated[
+    str | None,
+    typer.Option("--dataset", help="Dataset name. Optional when the project has exactly one."),
+]
+DryRunOption = Annotated[bool, typer.Option("--dry-run")]
 
 
 @app.command("create")
@@ -64,7 +75,9 @@ def create_command(
         typer.Option("--parent")
     ] = None,
 ) -> None:
-    root = create_project(name, experiment_type=experiment_type, subtype=subtype, mode=mode, parent=parent)
+    root = create_project(
+        name, experiment_type=experiment_type, subtype=subtype, mode=mode, parent=parent
+    )
     print(f"[green]Created project:[/green] {root}")
     print(f"Next: cd {root.name} && ball_project run")
 
@@ -82,78 +95,125 @@ def run_command() -> None:
 @app.command("pipeline")
 def pipeline_command(
     run: RunOption = None,
-    dry_run: Annotated[
-        bool, 
-        typer.Option("--dry-run")
-    ] = False
+    dry_run: DryRunOption = False
 ) -> None:
+    """Prepare the run's training dataset, then train the run."""
     run_pipeline(discover_project(), run_name=run, dry_run=dry_run)
+
+@app.command("prepare")
+def prepare_command(dataset: DatasetOption = None, dry_run: DryRunOption = False) -> None:
+    """Run the missing data stages of a dataset (no training)."""
+    context = discover_project()
+    prepare_dataset(context, context.dataset(dataset), dry_run=dry_run)
 
 
 @app.command("trajectories")
 def trajectories_command(
-    dry_run: Annotated[
-        bool, 
-        typer.Option("--dry-run")
-    ] = False
+    dataset: DatasetOption = None,
+    dry_run: DryRunOption = False
 ) -> None:
-    generate_trajectories(discover_project(), dry_run=dry_run)
+    context = discover_project()
+    generate_trajectories(context, context.dataset(dataset), dry_run=dry_run)
 
 
 @app.command("camera")
 def camera_command(
-    dry_run: Annotated[
-        bool, 
-        typer.Option("--dry-run")
-    ] = False
+    dataset: DatasetOption = None,
+    dry_run: DryRunOption = False
 ) -> None:
-    propose_camera(discover_project(), dry_run=dry_run)
+    context = discover_project()
+    propose_camera(context, context.dataset(dataset), dry_run=dry_run)
 
 
 @app.command("render")
 def render_command(
+    dataset: DatasetOption = None,
     trajectory_id: Annotated[
         str | None, 
         typer.Option("--trajectory-id")
     ] = None,
-    dry_run: Annotated[
-        bool, 
-        typer.Option("--dry-run")
-    ] = False,
+    dry_run: DryRunOption = False,
 ) -> None:
-    render(discover_project(), one=trajectory_id, dry_run=dry_run)
+    context = discover_project()
+    render(context, context.dataset(dataset), one=trajectory_id, dry_run=dry_run)
 
 
 @app.command("build-manifest")
 def manifest_command(
-    dry_run: Annotated[
-        bool, 
-        typer.Option("--dry-run")
-    ] = False
+    dataset: DatasetOption = None,
+    dry_run: DryRunOption = False
 ) -> None:
-    build_manifest(discover_project(), dry_run=dry_run)
+    context = discover_project()
+    build_manifest(context, context.dataset(dataset), dry_run=dry_run)
 
 
 @app.command("inspect-data")
 def inspect_command(
-    dry_run: Annotated[
-        bool, 
-        typer.Option("--dry-run")
-    ] = False
+    dataset: DatasetOption = None,
+    dry_run: DryRunOption = False
 ) -> None:
-    inspect_data(discover_project(), dry_run=dry_run)
+    context = discover_project()
+    inspect_data(context, context.dataset(dataset), dry_run=dry_run)
 
 
 @app.command("train")
 def train_command(
     run: RunOption = None,
-    dry_run: Annotated[
-        bool, 
-        typer.Option("--dry-run")
-    ] = False
+    dry_run: DryRunOption = False
 ) -> None:
     context = discover_project()
     train(context, context.run(run), dry_run=dry_run)
+
+
+@app.command("evaluate")
+def evaluate_command(
+    run: RunOption = None,
+    datasets: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--dataset",
+            help="Dataset to evaluate on; repeat for several. Default: the training dataset.",
+        ),
+    ] = None,
+    split: Annotated[
+        str | None,
+        typer.Option(
+            "--split",
+            help="train, validation, test or all. Default: test on the training dataset, "
+            "all on other datasets.",
+        ),
+    ] = None,
+    checkpoint: Annotated[
+        Path | None,
+        typer.Option(
+            "--checkpoint", exists=True, dir_okay=False,
+            help="Checkpoint to evaluate instead of the run's best.",
+        ),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option(
+            "--force", help="Evaluate despite a camera, resolution or frame-rate mismatch."
+        ),
+    ] = False,
+    dry_run: DryRunOption = False,
+) -> None:
+    """Evaluate a run; results go to runs/<run>/evaluations/<dataset>/."""
+    context = discover_project()
+    selected_run = context.run(run)
+    targets = [context.dataset(name) for name in datasets] if datasets else [None]
+    for dataset in targets:
+        output = evaluate_observer(
+            context, selected_run, dataset,
+            split=split, checkpoint=checkpoint, force=force, dry_run=dry_run,
+        )
+        print(f"[green]Evaluation:[/green] {output}")
+
+@app.command("report")
+def report_command() -> None:
+    """Collect all evaluations into reports/comparison.csv (one row per run and dataset)."""
+    path, rows = write_comparison(discover_project())
+    print(f"[green]Wrote {rows} evaluations to[/green] {path}")
 
 
 @config_app.command("edit")
@@ -162,23 +222,27 @@ def edit_command(
         str, 
         typer.Argument(help="trajectories, rendering, data, training, or project")
     ],
+    dataset: DatasetOption = None,
     run: RunOption = None,
     editor: Annotated[
         str | None, 
         typer.Option("--editor")
     ] = None,
 ) -> None:
+    """Dataset configs need --dataset (if several); training edits the base or --run's config."""
     context = discover_project()
-    mapping = {
-        "trajectories": context.manifest.configs.trajectories,
-        "rendering": context.manifest.configs.rendering,
-        "data": context.manifest.configs.data,
-        "training": context.manifest.configs.training,
-    }
-    if config_name == "training" and run is not None:
-        path = context.run(run).training_config
+    if config_name == "project":
+        path = context.manifest_path
+    elif config_name == "training":
+        path = (
+            context.run(run).training_config
+            if run is not None
+            else context.resolve(context.manifest.configs.training)
+        )
+    elif config_name in ("trajectories", "rendering", "data"):
+        path = context.dataset(dataset).configs / f"{config_name}.yaml"
     else:
-        path = context.manifest_path if config_name == "project" else context.resolve(mapping[config_name])
+        raise typer.BadParameter(f"Unknown config: {config_name!r}.")
     edit_file(path, editor)
 
 
@@ -189,31 +253,6 @@ def create_entrypoint() -> None:
 def run_entrypoint() -> None:
     app(args=["run", *sys.argv[1:]], prog_name="run_experiment")
 
-
-@app.command("evaluate")
-def evaluate_command(
-    run: RunOption = None,
-    checkpoint: Annotated[
-        Path | None,
-        typer.Option(
-            "--checkpoint",
-            exists=True,
-            dir_okay=False,
-            help="Evaluate this checkpoint (e.g. trained in another project) instead of the run's best.",
-        ),
-    ] = None,
-    dry_run: Annotated[
-        bool,
-        typer.Option("--dry-run"),
-    ] = False,
-) -> None:
-    context = discover_project()
-    evaluate_observer(
-        context,
-        context.run(run),
-        checkpoint=checkpoint,
-        dry_run=dry_run,
-    )
 
 @app.command("derive")
 def derive_command(
@@ -258,6 +297,37 @@ def derive_command(
     print("Training, evaluation, logs, and runtime records start empty.")
     print(f"Next: cd {result.root.name} && ball_project config edit training")
 
+
+@datasets_app.command("new")
+def datasets_new_command(
+    name: Annotated[str, typer.Argument(help="Name of the new dataset.")],
+    from_dataset: Annotated[
+        str | None,
+        typer.Option(
+            "--from",
+            help="Copy this dataset's configs (and its final camera) instead of the templates.",
+        ),
+    ] = None,
+    description: Annotated[str, typer.Option("--description")] = "",
+) -> None:
+    dataset = create_dataset(
+        discover_project(), name, from_dataset=from_dataset, description=description
+    )
+    print(f"[green]Created dataset:[/green] {dataset.root} (camera: {dataset.info().camera})")
+    print(f"Next: edit {dataset.configs}, then ball_project prepare --dataset {name}")
+
+
+@datasets_app.command("list")
+def datasets_list_command() -> None:
+    for dataset in inspect_status(discover_project()).datasets:
+        trajectories = dataset.trajectories if dataset.trajectories is not None else 0
+        print(
+            f"{dataset.name:30s} trajectories={trajectories:<6d} "
+            f"rendered={dataset.rendered_complete:<6d} camera={dataset.camera_mode:<8s} "
+            f"reference={dataset.reference or '-'}"
+        )
+
+
 @runs_app.command("new")
 def runs_new_command(
     name: Annotated[
@@ -280,4 +350,8 @@ def runs_new_command(
 @runs_app.command("list")
 def runs_list_command() -> None:
     for run in inspect_status(discover_project()).runs:
-        print(f"{run.name:30s} checkpoints={run.checkpoints:<3d} evaluated={'yes' if run.evaluated else 'no'}.")
+        evaluations = ",".join(run.evaluations) or "-"
+        print(
+            f"{run.name:30s} dataset={run.training_dataset or '-':<20s} "
+            f"checkpoints={run.checkpoints:<3d} evaluations={evaluations}"
+        )

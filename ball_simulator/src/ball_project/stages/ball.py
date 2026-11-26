@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ball_project.commands import executable, run_command
-from ball_project.discovery import ProjectContext, RunContext
+from ball_project.discovery import ProjectContext, RunContext, DatasetContext
 from ball_project.effective_configs import (
     effective_data_config,
     effective_render_config,
@@ -13,36 +13,44 @@ from ball_project.render_config import (
     camera_work_path,
     load_camera_omtimisation_settings,
 )
+from ball_project.runs import record_training_dataset
 
-def generate_trajectories(context: ProjectContext, *, dry_run: bool = False) -> None:
+def generate_trajectories(context: ProjectContext, dataset: DatasetContext, *, dry_run: bool = False) -> None:
     command = [
         executable("ball_simulator"),
         "generate",
-        str(context.resolve(context.manifest.configs.trajectories)),
+        str(dataset.rendering_config),
         "--environment",
         "free-flight",
         "--output",
-        str(context.resolve(context.manifest.paths.trajectory_dataset)),
+        str(dataset.trajectories),
         "--workers",
         str(context.manifest.runtime.simulation_workers),
     ]
-    run_command(context, command, stage="trajectories", dry_run=dry_run)
+    run_command(context, command, stage="trajectories", scope=dataset, dry_run=dry_run)
 
 
-def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
-    base_config = effective_render_config(context)
-    settings = load_camera_omtimisation_settings(context)
-    proposal = camera_work_path(context)
+def propose_camera(context: ProjectContext, dataset: DatasetContext, *, dry_run: bool = False) -> None:
+    if dataset.info().camera == "fixed":
+        raise ValueError(
+            f"Dataset {dataset.name!r} keeps the camera of its reference dataset "
+            f"(camera: fixed in {dataset.info_file}). Set camera: optimise to search a new one; "
+            "models trained on another camera then no longer apply."
+        )
+
+    base_config = effective_render_config(dataset)
+    settings = load_camera_omtimisation_settings(dataset)
+    proposal = camera_work_path(dataset)
     command = [
         executable("ball_renderer"),
         "propose-camera",
-        str(context.resolve(context.manifest.paths.trajectory_dataset)),
+        str(dataset.trajectories),
         "--config",
         str(base_config),
         "--output",
         str(proposal),
         "--report",
-        str(context.resolve(context.manifest.paths.camera_report)),
+        str(dataset.camera_report),
         "--minimum-diameter-px",
         str(settings.minimum_diameter_px),
         "--target-diameter-px",
@@ -50,7 +58,7 @@ def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
     ]
 
     if dry_run:
-        run_command(context, command, stage="camera", dry_run=True)
+        run_command(context, command, stage="camera", scope=dataset, dry_run=True)
         print(
             f"Camera optimisation settings: minimum_diameter_px="
             f"{settings.minimum_diameter_px}, target_diameter_px="
@@ -64,70 +72,84 @@ def propose_camera(context: ProjectContext, *, dry_run: bool = False) -> None:
 
     # The proposal is generated separately first. The authoritative config is changed
     # only after the external command has succeeded.
-    run_command(context, command, stage="camera", dry_run=dry_run)
-    backup = archive_rendering_config(context)
-    updated = apply_proposed_camera(context, proposal)
+    run_command(context, command, stage="camera", scope=dataset, dry_run=dry_run)
+    backup = archive_rendering_config(dataset)
+    updated = apply_proposed_camera(dataset, proposal)
     proposal.unlink(missing_ok=True)
     print(f"Updated active rendering config: {updated}")
     print(f"Previous rendering config archived at: {backup}")
 
 
-def render(context: ProjectContext, *, one: str | None = None, dry_run: bool = False) -> None:
+def render(
+    context: ProjectContext,
+    dataset: DatasetContext,
+    *, 
+    one: str | None = None, 
+    dry_run: bool = False
+) -> None:
+    runtime = context.manifest.runtime
     command = [
         executable("ball_renderer"),
         "render-trajectory",
-        str(context.resolve(context.manifest.paths.trajectory_dataset)),
+        str(dataset.trajectories),
         "--config",
-        str(effective_render_config(context)),
+        str(effective_render_config(dataset)),
         "--output-directory",
-        str(context.resolve(context.manifest.paths.rendered)),
+        str(dataset.rendered),
         "--workers",
-        str(context.manifest.runtime.render_workers),
+        str(runtime.render_workers),
         "--threads-per-blender",
-        str(context.manifest.runtime.threads_per_blender),
+        str(runtime.threads_per_blender),
     ]
     if one is None:
         command.append("--all")
     else:
         command.append(one)
-    if context.manifest.runtime.resume_rendering:
+    if runtime.resume_rendering:
         command.append("--resume")
-    if context.manifest.runtime.blender_executable is not None:
-        command.extend(["--blender-executable", str(context.manifest.runtime.blender_executable)])
-    run_command(context, command, stage="rendering", dry_run=dry_run)
+    if runtime.blender_executable is not None:
+        command.extend(["--blender-executable", str(runtime.blender_executable)])
+    run_command(context, command, stage="rendering", scope=dataset, dry_run=dry_run)
 
 
-def build_manifest(context: ProjectContext, *, dry_run: bool = False) -> None:
+def build_manifest(
+    context: ProjectContext, dataset: DatasetContext, *, dry_run: bool = False) -> None:
     command = [
         executable("ball_world_model"),
         "build-manifest",
         "--config",
-        str(effective_data_config(context)),
+        str(effective_data_config(dataset)),
         "--output",
-        str(context.resolve(context.manifest.paths.manifest)),
+        str(dataset.manifest),
     ]
-    run_command(context, command, stage="manifest", dry_run=dry_run)
+    run_command(context, command, stage="manifest", scope=dataset, dry_run=dry_run)
 
 
-def inspect_data(context: ProjectContext, *, dry_run: bool = False) -> None:
+def inspect_data(
+    context: ProjectContext, dataset: DatasetContext, *, dry_run: bool = False) -> None:
     command = [
         executable("ball_world_model"),
         "inspect-data",
         "--config",
-        str(effective_data_config(context)),
+        str(effective_data_config(dataset)),
         "--manifest",
-        str(context.resolve(context.manifest.paths.manifest)),
+        str(dataset.manifest),
         "--output",
-        str(context.resolve(context.manifest.paths.inspection) / "data_batch.png"),
+        str(dataset.inspection / "data_batch.png"),
     ]
-    run_command(context, command, stage="inspection", dry_run=dry_run)
+    run_command(context, command, stage="inspection", scope=dataset, dry_run=dry_run)
 
 
 def train(context: ProjectContext, run: RunContext, *, dry_run: bool = False) -> None:
+    """Train on the dataset named in the run's training.yaml, snapshotting its configs first."""
+    dataset = context.dataset(run.training_dataset_name())
+
     command = [
         executable("ball_world_model"),
         "train-kinematic",
         "--config",
         str(effective_training_config(context, run)),
     ]
-    run_command(context, command, stage="training", run=run, dry_run=dry_run)
+    if not dry_run:
+        record_training_dataset(run, dataset)
+    run_command(context, command, stage="training", scope=run, dry_run=dry_run)

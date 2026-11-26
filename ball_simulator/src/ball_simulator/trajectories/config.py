@@ -317,15 +317,14 @@ class ExperimentConfig(BaseModel):
                 "The native simulator models spheres only."
             )
 
-        aerodynamic = (
-            self.physics.drag_coefficient,
-            self.physics.magnus_coefficient,
-            self.physics.rotational_drag,
-        )
-        if any(spec.low != 0.0 or spec.high != 0.0 for spec in aerodynamic):
+        # Magnus (F = c ω × v) and rotational drag (τ = -c ω) are phenomenological terms that
+        # do not depend on the shape, so they are allowed. Air drag uses the sphere's
+        # cross-section π r², which has no meaning for other shapes.
+        drag = self.physics.drag_coefficient
+        if drag.low != 0.0 or drag.high != 0.0:
             raise ValueError(
-                "Drag, Magnus and rotational drag use sphere formulas. "
-                "Set them to zero for non-spherical shapes."
+                "Air drag uses the sphere's cross-section; set drag_coefficient to zero "
+                "for non-spherical shapes."
             )
 
         return self

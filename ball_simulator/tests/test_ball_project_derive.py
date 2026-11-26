@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ball_project.creator import create_project
 from ball_project.derive import derive_project_hard_copy
 from ball_project.discovery import discover_project
@@ -16,58 +18,48 @@ def _prepared_source(tmp_path: Path) -> Path:
         mode="translation",
         parent=tmp_path,
     )
-    trajectory = root / "data/trajectories/trajectories.h5"
-    trajectory.parent.mkdir(parents=True, exist_ok=True)
-    trajectory.write_bytes(b"independent trajectory copy")
+    dataset = discover_project(root).dataset()
+    dataset.trajectories.write_bytes(b"independent trajectory copy")
 
-    rendered = root / "data/rendered/trajectory_00000000"
+    rendered = dataset.rendered / "trajectory_00000000"
     (rendered / "rgb").mkdir(parents=True, exist_ok=True)
     (rendered / "rgb/000001.png").write_bytes(b"rendered frame")
     (rendered / "_SUCCESS").write_text("{}\n", encoding="utf-8")
+    dataset.manifest.write_bytes(b"manifest with absolute paths into the source")
+    dataset.camera_report.parent.mkdir(parents=True, exist_ok=True)
+    dataset.camera_report.write_text('{"score": 1.0}\n', encoding="utf-8")
+    (dataset.root / "logs").mkdir()
+    (dataset.root / "logs" / "old.log").write_text("old\n", encoding="utf-8")
 
-    manifest = root / "data/manifests/manifest.parquet"
-    manifest.parent.mkdir(parents=True, exist_ok=True)
-    manifest.write_bytes(b"manifest")
-
-    reports = root / "reports"
-    reports.mkdir(parents=True, exist_ok=True)
-    (reports / "camera.json").write_text('{"score": 1.0}\n', encoding="utf-8")
-
-    training = root / "runs/default/checkpoints"
-    training.mkdir(parents=True, exist_ok=True)
-    (training / "old.ckpt").write_bytes(b"must not be copied")
-    records = root / ".ball_project/records"
-    records.mkdir(parents=True, exist_ok=True)
-    (records / "old.json").write_text("{}\n", encoding="utf-8")
+    checkpoints = root / "runs/default/checkpoints"
+    checkpoints.mkdir(parents=True, exist_ok=True)
+    (checkpoints / "old.ckpt").write_bytes(b"must not be copied")
     return root
 
 
 def test_derive_makes_independent_hard_copy(tmp_path):
     source = _prepared_source(tmp_path)
-    result = derive_project_hard_copy(
-        "derived_trial",
-        source=source,
-        parent=tmp_path,
-    )
+    result = derive_project_hard_copy("derived_trial", source=source, parent=tmp_path)
     derived = result.root
+    source_dataset = source / "datasets/default"
+    derived_dataset = derived / "datasets/default"
 
     assert derived != source
-    assert (derived / "data/trajectories/trajectories.h5").read_bytes() == (
-        source / "data/trajectories/trajectories.h5"
+    assert result.datasets == 1 and result.rendered_trajectories == 1
+    assert (derived_dataset / "trajectories.h5").read_bytes() == (
+        source_dataset / "trajectories.h5"
     ).read_bytes()
-    assert (derived / "data/rendered/trajectory_00000000/_SUCCESS").is_file()
-    assert (derived / "data/manifests/manifest.parquet").is_file()
-    assert (derived / "reports/camera.json").is_file()
-    assert not list((derived / "runs/default").rglob("*.ckpt"))
-    assert not list((derived / ".ball_project/records").glob("*.json"))
+    assert (derived_dataset / "rendered/trajectory_00000000/_SUCCESS").is_file()
+    assert (derived_dataset / "reports/camera.json").is_file()
+    assert (derived_dataset / "dataset.yaml").is_file()
+    assert not (derived_dataset / "manifest.parquet").exists()  # rebuilt in the new project
+    assert not (derived_dataset / "logs").exists()
+    assert not list((derived / "runs").rglob("*.ckpt"))
+    assert (derived / "runs/default/training.yaml").is_file()
 
-    # Prove there is no link or source dependency: modifying the derived copy leaves
-    # the source bytes unchanged.
-    derived_trajectory = derived / "data/trajectories/trajectories.h5"
-    derived_trajectory.write_bytes(b"changed only in derived project")
-    assert (source / "data/trajectories/trajectories.h5").read_bytes() == (
-        b"independent trajectory copy"
-    )
+    # No link or source dependency: modifying the derived copy leaves the source unchanged.
+    (derived_dataset / "trajectories.h5").write_bytes(b"changed only in derived project")
+    assert (source_dataset / "trajectories.h5").read_bytes() == b"independent trajectory copy"
 
     context = discover_project(derived)
     assert context.manifest.project.name == "derived_trial"
@@ -78,18 +70,12 @@ def test_derive_makes_independent_hard_copy(tmp_path):
 
 def test_derive_refuses_existing_destination(tmp_path):
     source = _prepared_source(tmp_path)
-    destination = tmp_path / "derived_trial"
-    destination.mkdir()
-
-    try:
+    (tmp_path / "derived_trial").mkdir()
+    with pytest.raises(FileExistsError):
         derive_project_hard_copy("derived_trial", source=source, parent=tmp_path)
-    except FileExistsError:
-        pass
-    else:
-        raise AssertionError("Expected existing destination to be rejected")
 
 
-def test_derive_requires_completed_render_and_manifest(tmp_path):
+def test_derive_requires_rendered_data(tmp_path):
     source = create_project(
         "incomplete",
         experiment_type="ball",
@@ -97,12 +83,8 @@ def test_derive_requires_completed_render_and_manifest(tmp_path):
         mode="translation",
         parent=tmp_path,
     )
-    try:
+    with pytest.raises(FileNotFoundError):
         derive_project_hard_copy("derived", source=source, parent=tmp_path)
-    except FileNotFoundError:
-        pass
-    else:
-        raise AssertionError("Expected incomplete source to be rejected")
 
 
 def test_failed_derive_removes_destination(tmp_path, monkeypatch):
@@ -112,17 +94,6 @@ def test_failed_derive_removes_destination(tmp_path, monkeypatch):
         raise PermissionError("simulated copy failure")
 
     monkeypatch.setattr("ball_project.derive._copy_if_present", failing_copy)
-    destination = tmp_path / "derived_trial"
-    try:
-        derive_project_hard_copy(
-            "derived_trial",
-            source=source,
-            parent=tmp_path,
-        )
-    except PermissionError:
-        pass
-    else:
-        raise AssertionError(
-            "Expected simulated copy failure"
-        )
-    assert not destination.exists()
+    with pytest.raises(PermissionError):
+        derive_project_hard_copy("derived_trial", source=source, parent=tmp_path)
+    assert not (tmp_path / "derived_trial").exists()

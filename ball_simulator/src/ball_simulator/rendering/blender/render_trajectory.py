@@ -707,7 +707,7 @@ def environment_signature(job: dict) -> str:
 
 def ball_signature(job: dict) -> str:
     payload = {
-        "body": float(job["body"]),
+        "body": job["body"],
         "ball": job["render"]["ball"],
     }
 
@@ -1105,7 +1105,7 @@ def remove_object_and_mesh(obj) -> None:
 
 def setup_ball(job: dict):
     """Build the body and its marker spheres from job["body"] (body frame, m)."""
-    body = float(job["body"])
+    body = job["body"]
     config = job["render"]["ball"]
 
     if body["sphere_radius"] is not None:

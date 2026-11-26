@@ -7,7 +7,7 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .discovery import ProjectContext
+from .discovery import DatasetContext
 
 
 CAMERA_KEYS = (
@@ -37,12 +37,12 @@ class CameraOptimisationSettings(BaseModel):
         return self
 
 
-def rendering_config_path(context: ProjectContext) -> Path:
-    return context.resolve(context.manifest.configs.rendering)
+def rendering_config_path(dataset: DatasetContext) -> Path:
+    return dataset.rendering_config
 
 
-def load_camera_omtimisation_settings(context: ProjectContext) -> CameraOptimisationSettings:
-    path = rendering_config_path(context)
+def load_camera_omtimisation_settings(dataset: DatasetContext) -> CameraOptimisationSettings:
+    path = rendering_config_path(dataset)
     value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(value, dict):
         raise ValueError(f"Rendering configuration must contain a YAML mapping: {path}.")
@@ -59,17 +59,17 @@ def load_camera_omtimisation_settings(context: ProjectContext) -> CameraOptimisa
     return CameraOptimisationSettings.model_validate(raw_settings)
 
 
-def camera_work_path(context: ProjectContext) -> Path:
+def camera_work_path(dataset: DatasetContext) -> Path:
     """Temporary output used by external camera proposal command."""
-    path = context.root / ".ball_project/effective/rendering_camera_proposal.yaml"
+    path = dataset.effective / "rendering_camera_proposal.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
     return path
 
-def archive_rendering_config(context: ProjectContext) -> Path:
-    source = rendering_config_path(context)
+def archive_rendering_config(dataset: DatasetContext) -> Path:
+    source = rendering_config_path(dataset)
     if not source.is_file():
         raise FileNotFoundError(f"Rendering configuration does not exist: {source}")
-    history = context.root / "configs/history"
+    history = dataset.configs / "history"
     history.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S_%fZ")
     destination = history / f"rendering_before_camera_{stamp}.yaml"
@@ -78,7 +78,7 @@ def archive_rendering_config(context: ProjectContext) -> Path:
 
 
 def apply_proposed_camera(
-    context: ProjectContext,
+    dataset: DatasetContext,
     proposal_path: str | Path,
 ) -> Path:
     """
@@ -86,7 +86,7 @@ def apply_proposed_camera(
 
     Lighting, output, marker, resolution and all other manually edited setting remain exactly as they were in the authoritative base configuration.
     """
-    authoritative = rendering_config_path(context)
+    authoritative = rendering_config_path(dataset)
     proposal_path = Path(proposal_path)
     current = yaml.safe_load(authoritative.read_text(encoding="utf-8")) or {}
     proposal = yaml.safe_load(proposal_path.read_text(encoding="utf-8")) or {}

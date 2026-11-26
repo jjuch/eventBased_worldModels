@@ -20,7 +20,7 @@ def test_camera_proposal_updates_only_authoritative_camera(tmp_path):
         parent=tmp_path,
     )
     context = discover_project(root)
-    rendering = root / "configs/rendering.yaml"
+    rendering = root / "datasets/default/configs/rendering.yaml"
     before = yaml.safe_load(rendering.read_text(encoding="utf-8"))
 
     proposal = root / ".ball_project/effective/proposal.yaml"
@@ -32,8 +32,8 @@ def test_camera_proposal_updates_only_authoritative_camera(tmp_path):
     proposal.parent.mkdir(parents=True, exist_ok=True)
     proposal.write_text(yaml.safe_dump(proposed, sort_keys=False), encoding="utf-8")
 
-    backup = archive_rendering_config(context)
-    result = apply_proposed_camera(context, proposal)
+    backup = archive_rendering_config(context.dataset())
+    result = apply_proposed_camera(context.dataset(), proposal)
     after = yaml.safe_load(rendering.read_text(encoding="utf-8"))
 
     assert result == rendering
@@ -58,4 +58,4 @@ def test_rendering_always_uses_authoritative_config(tmp_path):
     legacy_generated.parent.mkdir(parents=True, exist_ok=True)
     legacy_generated.write_text("camera: {}\n", encoding="utf-8")
 
-    assert effective_render_config(context) == root / "configs/rendering.yaml"
+    assert effective_render_config(context.dataset()) == root / "datasets/default/configs/rendering.yaml"

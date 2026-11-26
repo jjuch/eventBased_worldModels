@@ -3,13 +3,24 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .datasets import create_dataset
+from .discovery import DEFAULT_DATASET, DEFAULT_RUN, load_project
 from .models import ExperimentInfo, ProjectManifest
-from .template_registry import definition, template_text
-from .discovery import DEFAULT_RUN, load_project
 from .runs import create_run
-
+from .template_registry import definition, template_text
 
 INITIAL_DIRECTORIES = ("configs", ".ball_project")
+
+GITIGNORE = (
+    # Heavy or regenerated data; configs, dataset.yaml, training.yaml and run.json stay tracked.
+    "datasets/*/trajectories.h5\ndatasets/*/rendered/\ndatasets/*/manifest.parquet\n"
+    "datasets/*/inspection/\ndatasets/*/effective/\ndatasets/*/logs/\ndatasets/*/records/\n"
+    "datasets/*/reports/*.json\n"
+    "runs/*/checkpoints/\nruns/*/tensorboard/\nruns/*/evaluations/\n"
+    "runs/*/logs/\nruns/*/records/\nruns/*/effective/\n"
+    "logs/\n.ball_project/records/\n"
+)
+
 
 def create_project(
     name: str,
@@ -19,6 +30,7 @@ def create_project(
     mode: str,
     parent: str | Path | None = None,
 ) -> Path:
+    """New project with one dataset and one run, both named ``default``."""
     template = definition(experiment_type, subtype)
     if mode not in template.modes:
         raise ValueError(
@@ -44,20 +56,16 @@ def create_project(
         )
     )
     manifest.to_yaml(root / "project.yaml")
+    context = load_project(root)
 
-    mapping = {
-        "trajectories.yaml": f"trajectories_{mode}.yaml",
-        "rendering.yaml": f"rendering_{mode}.yaml",
-        "data.yaml": "data.yaml",
-        "training.yaml": f"training_{mode}.yaml",
-    }
+    create_dataset(context, DEFAULT_DATASET, description="Training data.")
+    training = template_text(experiment_type, subtype, f"training_{mode}.yaml")
+    context.resolve(manifest.configs.training).write_text(
+        f"dataset: {DEFAULT_DATASET} # training dataset a folder under datasets/\n{training}",
+        encoding="utf-8",
+    )
 
-    for destination, source in mapping.items():
-        (root / "configs" / destination).write_text(
-            template_text(experiment_type, subtype, source), encoding="utf-8"
-        )
-
-    create_run(load_project(root), DEFAULT_RUN)
+    create_run(context, DEFAULT_RUN)
 
     (root / "README.md").write_text(
         template_text(experiment_type, subtype, "PROJECT_README.md").replace(
@@ -66,10 +74,7 @@ def create_project(
         encoding="utf-8",
     )
     (root / ".gitignore").write_text(
-        "data/\noutputs/\nlogs/\nreports/*.json\n.ball_project/effective/\n"
-        ".ball_project/records/\nconfigs/generated/\n"
-        "runs/*/checkpoints/\nruns/*/tensorboard/\nruns/*/evaluation/\n"
-        "runs/*/logs/\nruns/*/records/\nruns/*/effective/\n",
+        GITIGNORE,
         encoding="utf-8",
     )
     (root / ".ball_project" / "state.json").write_text("{}\n", encoding="utf-8")

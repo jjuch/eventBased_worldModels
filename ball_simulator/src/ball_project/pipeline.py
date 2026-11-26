@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from .discovery import ProjectContext
-from .status import inspect_status
+from .discovery import ProjectContext, DatasetContext
+from .status import inspect_dataset
 from .stages.ball import (
     build_manifest,
     generate_trajectories,
@@ -11,15 +11,22 @@ from .stages.ball import (
 )
 
 
-def run_pipeline(context: ProjectContext, *, run_name: str | None = None, dry_run: bool = False) -> None:
-    run = context.run(run_name) # fail before any expensive stage is the run is ambiguous
-    status = inspect_status(context)
+def prepare_dataset(
+    context: ProjectContext, dataset: DatasetContext, *, dry_run: bool = False
+) -> None:
+    """Run the missing data stages: trajectories, camera (unless fixed), renders, manifest."""
+    status = inspect_dataset(dataset)
     if status.trajectories is None:
-        generate_trajectories(context, dry_run=dry_run)
+        generate_trajectories(context, dataset, dry_run=dry_run)
     if not status.camera_ready:
-        propose_camera(context, dry_run=dry_run)
+        propose_camera(context, dataset, dry_run=dry_run)
     if status.trajectories is None or status.rendered_complete < status.trajectories:
-        render(context, dry_run=dry_run)
+        render(context, dataset, dry_run=dry_run)
     if not status.manifest_ready:
-        build_manifest(context, dry_run=dry_run)
+        build_manifest(context, dataset, dry_run=dry_run)
+
+def run_pipeline(context: ProjectContext, *, run_name: str | None = None, dry_run: bool = False) -> None:
+    """Prepare the run's training dataset, then train the run."""
+    run = context.run(run_name)  # fail before any expensive stage if the run is ambiguous
+    prepare_dataset(context, context.dataset(run.training_dataset_name()), dry_run=dry_run)
     train(context, run, dry_run=dry_run)

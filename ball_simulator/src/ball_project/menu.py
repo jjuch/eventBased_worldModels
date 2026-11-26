@@ -3,10 +3,12 @@ from __future__ import annotations
 from rich.console import Console
 from rich.prompt import IntPrompt, Prompt
 
-from .discovery import ProjectContext, RunContext
-from .runs import create_run
+from .datasets import create_dataset
+from .discovery import ProjectContext, RunContext, DatasetContext
 from .editor import edit_file
-from .status import inspect_status
+from .pipeline import prepare_dataset
+from .report import write_comparison
+from .runs import create_run
 from .stages.ball import (
     build_manifest,
     generate_trajectories,
@@ -16,58 +18,83 @@ from .stages.ball import (
     train,
 )
 from .stages.evaluation import evaluate_observer
+from .status import inspect_status
 
 console = Console()
 
 
-def show_status(context: ProjectContext, selected_run: str | None = None) -> None:
+def show_status(
+    context: ProjectContext,
+    selected_dataset: str | None = None,
+    selected_run: str | None = None,
+) -> None:
     status = inspect_status(context)
     console.print(f"[bold]Project:[/bold] {context.manifest.project.name}")
     console.print(
         f"[bold]Type:[/bold] {context.manifest.project.type} / "
         f"{context.manifest.project.subtype} / {context.manifest.project.mode}"
     )
-    console.print(
-        f"Trajectories: "
-        f"{status.trajectories if status.trajectories is not None else 'not generated'}")
-    console.print(f"Camera proposal: {'applied' if status.camera_ready else 'not applied'}")
-    console.print(f"Active rendering config: {status.active_rendering_config}")
-    if status.camera_summary is not None:
-        console.print(f"Active camera: {status.camera_summary}")
-    console.print(f"Rendered trajectories: {status.rendered_complete}")
-    console.print(f"Manifest: {'ready' if status.manifest_ready else 'not built'}")
-    if not status.runs:
-        console.print("Runs: none yet.")
+    console.print("[bold]Datasets[/bold]" if status.datasets else "Datasets: none yet.")
+    for dataset in status.datasets:
+        marker = "*" if dataset.name == selected_dataset else " "
+        trajectories = dataset.trajectories if dataset.trajectories is not None else "-"
+        camera = "fixed" if dataset.camera_mode == "fixed" else (
+            "optimised" if dataset.camera_ready else "not optimised"
+        )
+        reference = f", from {dataset.reference}" if dataset.reference else ""
+        console.print(
+            f" {marker} {dataset.name}: {trajectories} trajectories, "
+            f"{dataset.rendered_complete} rendered, camera {camera}, "
+            f"manifest {'ready' if dataset.manifest_ready else 'not built'}{reference}."
+        )
+    console.print("[bold]Runs[/bold]" if status.runs else "Runs: none yet.")
     for run in status.runs:
         marker = "*" if run.name == selected_run else " "
+        evaluations = ", ".join(run.evaluations) if run.evaluations else "none"
         console.print(
-            f" {marker} Run {run.name}: {run.checkpoints} checkpoints, "
-            f"{'evaluated' if run.evaluated else 'not evaluated'}."
+            f" {marker} {run.name}: trains on {run.training_dataset}, "
+            f"{run.checkpoints} checkpoints, evaluated on: {evaluations}."
         )
 
 
-def _ask_run(context: ProjectContext) -> str:
-    names = context.run_names()
+def _ask(kind: str, names: list[str]) -> str:
     if not names:
-        raise FileNotFoundError("No runs yet. Choose 'Create run' first.")
+        raise FileNotFoundError(f"No {kind}s yet. Choose 'Create {kind}' first.")
 
     if len(names) == 1:
         return names[0]
-    return Prompt.ask("Run", choices=names, default=names[-1])
+    return Prompt.ask(kind.capitalize(), choices=names, default=names[-1])
 
 
 def run_menu(context: ProjectContext) -> None:
-    names = context.run_names()
-    selected = {"run": names[0] if len(names) == 1 else None}
+    datasets, runs = context.dataset_names(), context.run_names()
+    selected = {
+        "dataset": datasets[0] if len(datasets) == 1 else None,
+        "run": runs[0] if len(runs) == 1 else None,
+    }
+
+    def current_dataset() -> DatasetContext:
+        """The selected dataset. Ask once if none is selected or it no longer exists."""
+        if selected["dataset"] not in context.dataset_names():
+            selected["dataset"] = _ask("dataset", context.dataset_names())
+        return context.dataset(selected["dataset"])
 
     def current_run() -> RunContext:
         """The selected run. Ask once if none is selected or it no longer exists."""
         if selected["run"] not in context.run_names():
-            selected["run"] = _ask_run(context)
+            selected["run"] = _ask("run", context.run_names())
         return context.run(selected["run"])
 
-    def switch_run() -> None:
-        selected["run"] = _ask_run(context)
+    def switch(kind: str) -> None:
+        names = context.dataset_names() if kind == "dataset" else context.run_names()
+        selected[kind] = _ask(kind, names)
+
+    def new_dataset() -> None:
+        """The selected dataset. Ask once if none is selected or it no longer exists."""
+        if selected["dataset"] not in context.dataset_names():
+            selected["dataset"] = _ask("dataset", context.dataset_names())
+        return context.dataset(selected["dataset"])
+
 
     def new_run() -> None:
         name = Prompt.ask("New run name")
@@ -78,27 +105,43 @@ def run_menu(context: ProjectContext) -> None:
         selected["run"] = run.name
         console.print(f"Created {run.root}. Edit its training config before training.")
 
+    def evaluate() -> None:
+        output = evaluate_observer(context, current_run(), current_dataset())
+        console.print(f"Evaluation written to {output}.")
+
+    def report() -> None:
+        path, rows = write_comparison(context)
+        console.print(f"Wrote {rows} evaluations to {path}.")
 
     actions = {
-        1: ("Generate trajectories", lambda: generate_trajectories(context)),
-        2: ("Propose camera", lambda: propose_camera(context)),
-        3: ("Render all trajectories", lambda: render(context)),
-        4: ("Build manifest", lambda: build_manifest(context)),
-        5: ("Inspect data", lambda: inspect_data(context)),
-        6: ("Train selected run", lambda: train(context, current_run())),
-        7: ("Evaluate selected run", lambda: evaluate_observer(context, current_run())),
-        8: ("Edit trajectory config", lambda: edit_file(context.resolve(context.manifest.configs.trajectories))),
-        9: ("Edit rendering config", lambda: edit_file(context.resolve(context.manifest.configs.rendering))),
-        10: ("Edit data config", lambda: edit_file(context.resolve(context.manifest.configs.data))),
-        11: ("Edit base training config (template for new runs)", lambda: edit_file(context.resolve(context.manifest.configs.training))),
-        12: ("Create run", new_run),
-        13: ("Switch run", switch_run),
-        14: ("Edit selected run's training config", lambda: edit_file(current_run().training_config)),
+        1: ("Generate trajectories (selected dataset)",
+            lambda: generate_trajectories(context, current_dataset())),
+        2: ("Propose camera (selected dataset)", lambda: propose_camera(context, current_dataset())),
+        3: ("Render all trajectories (selected dataset)", lambda: render(context, current_dataset())),
+        4: ("Build manifest (selected dataset)", lambda: build_manifest(context, current_dataset())),
+        5: ("Inspect data (selected dataset)", lambda: inspect_data(context, current_dataset())),
+        6: ("Prepare selected dataset (all missing data stages)",
+            lambda: prepare_dataset(context, current_dataset())),
+        7: ("Train selected run", lambda: train(context, current_run())),
+        8: ("Evaluate selected run on selected dataset", evaluate),
+        9: ("Write comparison report", report),
+        10: ("Edit trajectory config (selected dataset)",
+             lambda: edit_file(current_dataset().trajectories_config)),
+        11: ("Edit rendering config (selected dataset)",
+             lambda: edit_file(current_dataset().rendering_config)),
+        12: ("Edit data config (selected dataset)", lambda: edit_file(current_dataset().data_config)),
+        13: ("Edit selected run's training config", lambda: edit_file(current_run().training_config)),
+        14: ("Edit base training config (template for new runs)",
+             lambda: edit_file(context.resolve(context.manifest.configs.training))),
+        15: ("Create dataset", new_dataset),
+        16: ("Create run", new_run),
+        17: ("Switch dataset", lambda: switch("dataset")),
+        18: ("Switch run", lambda: switch("run")),
     }
 
     while True:
         console.rule("Ball World Model Project")
-        show_status(context, selected["run"])
+        show_status(context, selected["dataset"], selected["run"])
         console.print()
         for number, (label, _) in actions.items():
             console.print(f"  {number:2d}. {label}")

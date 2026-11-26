@@ -32,7 +32,9 @@ class RenderedTrajectoryDataset(Dataset[dict[str, object]]):
             load_manifest(manifest) 
             if not isinstance(manifest, pd.DataFrame) else manifest.copy()
         )
-        self.frame = frame.loc[frame["split"] == split].reset_index(drop=True)
+        # "all" evaluates a held-out dataset on every trajectory, whatever its split label.
+        selected = frame if split == "all" else frame.loc[frame["split"] == split]
+        self.frame = selected.reset_index(drop=True)
         if self.frame.empty:
             raise ValueError(f"Manifest contains no trajectories for split {split!r}.")
 

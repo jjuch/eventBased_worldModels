@@ -17,21 +17,13 @@ class ExperimentInfo(BaseModel):
 
 
 class ProjectConfigs(BaseModel):
-    trajectories: Path = Path("configs/trajectories.yaml")
-    rendering: Path = Path("configs/rendering.yaml")
-    data: Path = Path("configs/data.yaml")
     training: Path = Path("configs/training.yaml")
-    optimised_rendering: Path = Path("configs/generated/rendering_optimised.yaml")
 
 
 class ProjectPaths(BaseModel):
-    trajectory_dataset: Path = Path("data/trajectories/trajectories.h5")
-    rendered: Path = Path("data/rendered")
-    manifest: Path = Path("data/manifests/manifest.parquet")
+    datasets: Path = Path("datasets")
     runs: Path = Path("runs")
-    inspection: Path = Path("outputs/inspection")
-    camera_report: Path = Path("reports/camera.json")
-    logs: Path = Path("logs")
+    reports: Path = Path("reports")
 
 
 class RuntimeConfig(BaseModel):
@@ -60,6 +52,31 @@ class ProjectManifest(BaseModel):
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "ProjectManifest":
+        with Path(path).open("r", encoding="utf-8") as handle:
+            return cls.model_validate(yaml.safe_load(handle))
+
+    def to_yaml(self, path: str | Path) -> None:
+        with Path(path).open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(self.model_dump(mode="json"), handle, sort_keys=False)
+
+
+class DatasetInfo(BaseModel):
+    """Contents of ``datasets/<name>/dataset.yaml``.
+
+    reference  dataset whose configs this one was copied from, if any
+    camera     ``optimise``: search a camera for this dataset; ``fixed``: keep the camera in
+               rendering.yaml (copied from the reference, so a trained observer sees the
+               same view)
+    """
+
+    name: str = Field(min_length=1)
+    created_at: str
+    description: str = ""
+    reference: str | None = None
+    camera: Literal["optimise", "fixed"] = "optimise"
+
+    @classmethod
+    def from_yaml(cls, path: str | Path) -> "DatasetInfo":
         with Path(path).open("r", encoding="utf-8") as handle:
             return cls.model_validate(yaml.safe_load(handle))
 

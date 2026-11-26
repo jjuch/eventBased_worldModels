@@ -16,9 +16,11 @@ def test_project_creation_is_lazy(tmp_path: Path):
     )
     assert (root / "configs").is_dir()
     assert (root / ".ball_project").is_dir()
-    assert not (root / "data").exists()
-    assert not (root / "outputs").exists()
+    dataset = root / "datasets" / "default"
+    assert not (dataset / "trajectories.h5").exists()
+    assert not (dataset / "rendered").exists()
     assert not (root / "logs").exists()
+    assert not (root / "reports").exists()
 
 
 def test_run_command_creates_stage_log(tmp_path: Path):

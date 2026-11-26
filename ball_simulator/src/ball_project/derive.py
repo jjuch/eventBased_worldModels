@@ -16,20 +16,16 @@ class DeriveResult:
     source_root: Path
     copied_bytes: int
     rendered_trajectories: int
+    datasets: int
 
     @property
     def copied_gibibytes(self) -> float:
         return self.copied_bytes / 1024**3
 
 
-_EMPTY_DIRECTORIES = (
-    "runs",
-    "outputs/inspection",
-    "logs/trajectories",
-    "logs/rendering",
-    ".ball_project/effective",
-    ".ball_project/records",
-)
+# Not copied: run-time state, and the manifest, which stores absolute paths into the source
+# project and is rebuilt (cheaply) in the derived one.
+_SKIPPED_IN_DATASETS = ("logs", "records", "effective", "inspection", "manifest.parquet")
 
 def _directory_size(path: Path) -> int:
     if not path.exists():
@@ -42,90 +38,31 @@ def _rendered_success_count(rendered: Path) -> int:
     return sum(1 for _ in rendered.glob("trajectory_*/_SUCCESS"))
 
 
-def _validate_prepared_source(context: ProjectContext) -> tuple[int, int]:
-    root = context.root
-    if not (root / "configs").is_dir():
-        raise FileNotFoundError(f"Source project has no configs directory: {root / 'configs'}")
-
-    project_asset_paths = (
-        context.manifest.paths.trajectory_dataset,
-        context.manifest.paths.rendered,
-        context.manifest.paths.manifest,
-        context.manifest.paths.camera_report,
-    )
-    absolute_paths = [str(path) for path in project_asset_paths if path.is_absolute()]
-    if absolute_paths:
-        raise ValueError(
-            "Hard-copy derivation requires project-local relative asset paths. "
-            f"Absolute paths found: {absolute_paths}"
-        )
-
-    trajectory_dataset = context.resolve(context.manifest.paths.trajectory_dataset)
-    rendered = context.resolve(context.manifest.paths.rendered)
-    manifest = context.resolve(context.manifest.paths.manifest)
-    if not trajectory_dataset.is_file():
-        raise FileNotFoundError(f"Trajectory dataset does not exist: {trajectory_dataset}")
-    if not manifest.is_file():
-        raise FileNotFoundError(f"Rendered-data manifest does not exist: {manifest}")
-
-    successes = _rendered_success_count(rendered)
-    if successes == 0:
-        raise FileNotFoundError(
-            f"No completed rendered trajectories were found under {rendered}. "
-            "Derive projects after rendering and manifest creation."
-        )
-
-    copied_paths = (
-        root / "configs",
-        trajectory_dataset,
-        rendered,
-        manifest,
-        context.resolve(context.manifest.paths.camera_report),
-    )
-    return sum(_directory_size(path) for path in copied_paths), successes
-
-
 def _copy_if_present(source: Path, destination: Path) -> None:
     if source.is_dir():
-        shutil.copytree(source, destination, copy_function=shutil.copy2)
+        shutil.copytree(source, destination, copy_function=shutil.copy2, ignore=shutil.ignore_patterns(*_SKIPPED_IN_DATASETS))
     elif source.is_file():
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
 
-
-def _write_fresh_runtime_state(root: Path) -> None:
-    state_directory = root / ".ball_project"
-    state_directory.mkdir(parents=True, exist_ok=True)
-    (state_directory / "state.json").write_text("{}\n", encoding="utf-8")
-
-
-def _rewrite_project_manifest(
-    source_context: ProjectContext,
-    temporary_root: Path,
-    *,
-    new_name: str,
-) -> None:
-    manifest = source_context.manifest.model_copy(deep=True)
-    manifest.project.name = new_name
+def _write_manifest_and_lineage(source: ProjectContext, destination: Path, name: str) -> None:
+    manifest = source.manifest.model_copy(deep=True)
+    manifest.project.name = name
     manifest.project.created_at = datetime.now(timezone.utc).isoformat()
+    manifest.to_yaml(destination / "project.yaml")
 
-    # `derived_from` is optional metadata. Older ProjectManifest models may not yet define it, so preserve the information in a separate lineage file as well.
-    source_manifest_relative = str(source_context.manifest_path.resolve())
-    if hasattr(manifest.project, "derived_from"):
-        manifest.project.derived_from = source_manifest_relative
-
-    manifest.to_yaml(temporary_root / "project.yaml")
+    state = destination / ".ball_project"
+    state.mkdir(parents=True, exist_ok=True)
+    (state / "state.json").write_text("{}\n", encoding="utf-8")
     lineage = {
         "kind": "hard-copy",
-        "source_project": str(source_context.root.resolve()),
-        "source_manifest": source_manifest_relative,
+        "source_project": str(source.root.resolve()),
+        "source_manifest": str(source.manifest_path.resolve()),
         "derived_at": datetime.now(timezone.utc).isoformat(),
         "independent_after_creation": True,
     }
-    (temporary_root / ".ball_project" / "lineage.json").write_text(
-        json.dumps(lineage, indent=2) + "\n",
-        encoding="utf-8",
-    )
+    (state / "lineage.json").write_text(json.dumps(lineage, indent=2) + "\n", encoding="utf-8")
+
 
 def derive_project_hard_copy(
     name: str,
@@ -133,10 +70,10 @@ def derive_project_hard_copy(
     source: str | Path,
     parent: str | Path | None = None,
 ) -> DeriveResult:
-    """
-    Create a self-contained experiment by hard-copying prepared simulation/render data.
+    """Create an independent project by hard-copying another project's datasets.
 
-    The destination receives independent copies of configs, trajectories, renders,manifests, and reports. Training outputs, evaluations, logs, effective configs, and execution records start empty.
+    The destination gets the base configs and every dataset (configs, trajectories, renders,
+    camera reports). Manifests are rebuilt on first use. Runs start with a fresh ``default``.
     """
     if not name or name in {".", ".."} or Path(name).name != name:
         raise ValueError("name must be one project-folder name, without path separators")
@@ -147,53 +84,31 @@ def derive_project_hard_copy(
     if destination.exists():
         raise FileExistsError(f"Destination project already exists: {destination}")
 
-    copied_bytes, rendered_trajectories = _validate_prepared_source(source_context)
+    datasets = [source_context.dataset(dataset) for dataset in source_context.dataset_names()]
+    rendered_trajectories = sum(_rendered_success_count(dataset.rendered) for dataset in datasets)
+    if rendered_trajectories == 0:
+        raise FileNotFoundError(
+            f"No rendered trajectories found in the datasets of {source_context.root}. "
+            "Derive projects after rendering."
+        )
+    copied_bytes = sum(_directory_size(dataset.root) for dataset in datasets)
 
     try:
         destination.mkdir(parents=True, exist_ok=False)
-
-        # Copy only prepared scientific inputs and data. This deliberately avoids
-        # training artifacts and stale generated runtime configuration.
         _copy_if_present(source_context.root / "configs", destination / "configs")
-
-        # Preserve project-local path semantics even when a project uses customized
-        # relative paths rather than the default data/* layout.
-        assets = (
-            (
-                source_context.resolve(source_context.manifest.paths.trajectory_dataset),
-                destination / source_context.manifest.paths.trajectory_dataset,
-            ),
-            (
-                source_context.resolve(source_context.manifest.paths.rendered),
-                destination / source_context.manifest.paths.rendered,
-            ),
-            (
-                source_context.resolve(source_context.manifest.paths.manifest),
-                destination / source_context.manifest.paths.manifest,
-            ),
-            (
-                source_context.resolve(source_context.manifest.paths.camera_report),
-                destination / source_context.manifest.paths.camera_report,
-            ),
-        )
-        for source_asset, destination_asset in assets:
-            _copy_if_present(source_asset, destination_asset)
-
-        for directory in _EMPTY_DIRECTORIES:
-            (destination / directory).mkdir(parents=True, exist_ok=True)
-        _write_fresh_runtime_state(destination)
-        _rewrite_project_manifest(source_context, destination, new_name=name)
+        for dataset in datasets:
+            _copy_if_present(
+                dataset.root,
+                destination / source_context.manifest.paths.datasets / dataset.name,
+            )
+        _write_manifest_and_lineage(source_context, destination, name)
         create_run(load_project(destination), DEFAULT_RUN)
 
-        source_readme = source_context.root / "README.md"
-        if source_readme.is_file():
-            shutil.copy2(source_readme, destination / "README.md")
-        source_gitignore = source_context.root / ".gitignore"
-        if source_gitignore.is_file():
-            shutil.copy2(source_gitignore, destination / ".gitignore")
-
+        for file_name in ("README.md", ".gitignore"):
+            if (source_context.root / file_name).is_file():
+                shutil.copy2(source_context.root / file_name, destination / file_name)
     except BaseException:
-        # The destination may be incomplete. Remove it so it is never mistaken for a valid derived project.
+        # The destination may be incomplete. Remove it so it is never mistaken for a valid project.
         shutil.rmtree(destination, ignore_errors=True)
         raise
 
@@ -202,4 +117,5 @@ def derive_project_hard_copy(
         source_root=source_context.root,
         copied_bytes=copied_bytes,
         rendered_trajectories=rendered_trajectories,
+        datasets=len(datasets),
     )

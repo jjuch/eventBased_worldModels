@@ -419,8 +419,11 @@ def evaluate_kinematic_observer(
     output_directory: str | Path,
     settings: EvaluationSettings = EvaluationSettings(),
     rendering_config_path: str | Path | None = None,
+    split: str = "test",
 ) -> Path:
     """Evaluate the current-state estimate, whole-window estimates and rollouts.
+
+    ``split`` is train, validation, test, or all (every trajectory, for held-out datasets).
  
     With ``rendering_config_path`` (the project's rendering.yaml, which holds the camera) the rollouts are also drawn on the rendered frames.
     """
@@ -432,7 +435,7 @@ def evaluate_kinematic_observer(
     configuration = yaml.safe_load(training_config_path.read_text(encoding="utf-8"))
     data_config = DataConfig.from_yaml(Path(configuration["data_config"]))
     manifest = data_config.manifest_path or data_config.root / "manifest.parquet"
-    dataset = RenderedTrajectoryDataset(manifest, data_config, split="test")
+    dataset = RenderedTrajectoryDataset(manifest, data_config, split=split)
     loader = build_dataloader(dataset, data_config, shuffle=False)
     module = SE3ObserverModule.load_from_checkpoint(checkpoint_path, map_location="cpu")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -446,6 +449,7 @@ def evaluate_kinematic_observer(
     summary = _summary(records)
     summary["checkpoint"] = str(checkpoint_path.resolve())
     summary["training_config"] = str(training_config_path.resolve())
+    summary["split"] = split
 
     appearance_path = Path(data_config.root) / APPEARANCE_FILE
     if appearance_path.is_file():

@@ -48,6 +48,10 @@ def register_evaluation_command(app: typer.Typer) -> None:
             float,
             typer.Option("--ball_radius", min=0.0)
         ] = 0.10,
+        split: Annotated[
+            str,
+            typer.Option("--split", help="train, validation, test, or all.")
+        ] = "test",
     ) -> None:
         """Evaluate physical predictions, interventions, and layerwise probes."""
         saved = evaluate_kinematic_observer(
@@ -62,5 +66,6 @@ def register_evaluation_command(app: typer.Typer) -> None:
                 ball_radius=ball_radius,
             ),
             rendering_config_path=rendering_config,
+            split=split,
         )
         print(f"[green]Saved observer evaluation:[/green] {saved}")

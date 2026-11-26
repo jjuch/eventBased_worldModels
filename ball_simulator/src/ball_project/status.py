@@ -5,29 +5,38 @@ from dataclasses import dataclass
 import h5py
 import yaml
 
-from .discovery import ProjectContext
+from .discovery import ProjectContext, DatasetContext
+
+
+@datacless(frozen=True, slots=True)
+class DatasetStatus:
+    name: str
+    description: str
+    reference: str | None
+    camera_mode: str
+    trajectories: int | None
+    camera_ready: bool
+    rendered_complete: int
+    manifest_ready: bool
+    _camera_summary: str | None
 
 
 @dataclass(frozen=True, slots=True)
 class RunStatus:
     name: str
+    training_dataset: str | None
     checkpoints: int
-    evaluated: bool
+    evaluations: list[str]
 
 
 @dataclass(frozen=True, slots=True)
 class ProjectStatus:
-    trajectories: int | None
-    camera_ready: bool
-    rendered_complete: int
-    manifest_ready: bool
+    datasets: list[DatasetStatus]
     runs: list[RunStatus]
-    active_rendering_config: str
-    camera_summary: str | None
 
 
-def _camera_summary(context: ProjectContext) -> str | None:
-    path = context.resolve(context.manifest.configs.rendering)
+def _camera_summary(dataset: DatasetContext) -> str | None:
+    path = dataset.rendering_config
     if not path.is_file():
         return None
     value = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -39,40 +48,52 @@ def _camera_summary(context: ProjectContext) -> str | None:
         f"focal_length_mm={camera.get('focal_length_mm')}"
     )
 
+def _trajectory_count(dataset: DatasetContext) -> int | None:
+    if not dataset.trajectories.is_file():
+        return None
+    try:
+        with h5py.File(dataset.trajectories, "r") as handle:
+            return len(handle.get("trajectories", {}))
+    except OSError:
+        return None
+
+
+def inspect_dataset(dataset: DatasetContext) -> DatasetStatus:
+    info = dataset.info()
+    return DatasetStatus(
+        name=dataset.name,
+        description=info.description,
+        reference=info.reference,
+        camera_mode=info.camera,
+        trajectories=_trajectory_count(dataset),
+        camera_ready=info.camera == "fixed" or dataset.camera_report.is_file(),
+        rendered_complete=sum(1 for _ in dataset.rendered.glob("trajectory_*/_SUCCESS")),
+        manifest_ready=dataset.manifest.is_file(),
+        camera_summary=_camera_summary(dataset),
+    )
+
 
 def inspect_status(context: ProjectContext) -> ProjectStatus:
-    dataset = context.resolve(context.manifest.paths.trajectory_dataset)
-    trajectory_count = None
-    if dataset.is_file():
-        try:
-            with h5py.File(dataset, "r") as handle:
-                trajectory_count = len(handle.get("trajectories", {}))
-        except OSError:
-            trajectory_count = None
-            
-    rendered = context.resolve(context.manifest.paths.rendered)
-    rendered_complete = sum(1 for path in rendered.glob("trajectory_*/_SUCCESS"))
-
-    camera_report = context.resolve(context.manifest.paths.camera_report)
-
-    manifest = context.resolve(context.manifest.paths.manifest)
-
+    datasets = [inspect_dataset(context.dataset(name)) for name in context.dataset_names()]
     runs = []
     for name in context.run_names():
         run = context.run(name)
+        try:
+            training_dataset = run.training_dataset_name()
+        except ValueError:
+            training_dataset = None
+        evaluations = (
+            sorted(
+                path.name for path in run.evaluations.iterdir()
+                if (path / "metrics.json").is_file()
+            )
+            if run.evaluations.is_dir()
+            else []
+        )
         runs.append(RunStatus(
             name=name,
+            training_dataset=training_dataset,
             checkpoints=len(list(run.checkpoints.glob("*.ckpt"))),
-            evaluated=(run.evaluation / "metrics.json").is_file(),
+            evaluations=evaluations,
         ))
-
-    active = context.resolve(context.manifest.configs.rendering)
-    return ProjectStatus(
-        trajectories=trajectory_count,
-        camera_ready=camera_report.is_file(),
-        rendered_complete=rendered_complete,
-        manifest_ready=manifest.is_file(),
-        runs=runs,
-        active_rendering_config=str(active),
-        camera_summary=_camera_summary(context),
-    )
+    return ProjectStatus(datasets=datasets, runs=runs)
