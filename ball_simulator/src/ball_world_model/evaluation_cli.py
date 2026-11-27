@@ -28,10 +28,6 @@ def register_evaluation_command(app: typer.Typer) -> None:
             int,
             typer.Option("--maximum-test-windows", min=1),
         ] = 2_000,
-        maximum_probe_train_windows: Annotated[
-            int,
-            typer.Option("--maximum-probe-train-windows", min=10),
-        ] = 5_000,
         trajectory_plots: Annotated[
             int,
             typer.Option("--trajectory-plots", min=0),
@@ -60,7 +56,6 @@ def register_evaluation_command(app: typer.Typer) -> None:
             output_directory=output,
             settings=EvaluationSettings(
                 maximum_test_windows=maximum_test_windows,
-                maximum_probe_train_windows=maximum_probe_train_windows,
                 trajectory_plots=trajectory_plots,
                 seed=seed,
                 ball_radius=ball_radius,

@@ -27,6 +27,11 @@ COLUMNS = (
     "orientation_symmetric_median_deg",
     "rollout_final_position_median_m",
     "rollout_final_orientation_median_deg",
+    "gravity_direction_median_deg",
+    "camera_linear_velocity_norm_rmse_m_s",
+    "camera_angular_velocity_norm_rmse_rad_s",
+    "depth_scale",
+    "along_ray_bias_m",
     "forced_mismatches",
     "evaluation_directory",
 )
@@ -77,6 +82,15 @@ def evaluation_row(run_name: str, directory: Path) -> dict[str, Any]:
         "rollout_final_orientation_median_deg": _last(
             _get(horizon, "orientation_error_deg", "median")
         ),
+        "gravity_direction_median_deg": _get(metrics, "gravity_direction_error_deg", "median"),
+        "camera_linear_velocity_norm_rmse_m_s": _get(
+            metrics, "camera", "linear_velocity", "norm_rmse"
+        ),
+        "camera_angular_velocity_norm_rmse_rad_s": _get(
+            metrics, "camera", "angular_velocity", "norm_rmse"
+        ),
+        "depth_scale": _get(metrics, "viewing_ray", "depth_scale"),
+        "along_ray_bias_m": _get(metrics, "viewing_ray", "along_ray_bias_m"),
         "forced_mismatches": ";".join(sorted(record.get("mismatches", {}))),
         "evaluation_directory": str(directory),
     }

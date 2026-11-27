@@ -102,8 +102,8 @@ class ObserverModelConfig(StrictModel):
     temporal_layers: int = Field(default=2, ge=0)
     keypoints: int = Field(default=8, ge=2)
     keypoint_dim: int = Field(default=32, ge=4)
+    scene_dim: int = Field(default=256, ge=16)
     default_dt: float = Field(default=0.01, gt=0.0)
-    predict_acceleration: bool = True
     standardiser_momentum: float = Field(default=0.01, gt=0.0, le=1.0)
 
 
@@ -116,6 +116,9 @@ class ObserverLossConfig(StrictModel):
     rollout_steps: int = Field(default=5, ge=1)
     orientation_scale_deg: float = Field(default=5.0, gt=0.0)
     kinematic: float = Field(default=0.0, ge=0.0)
+    gravity: float = Field(default=1.0, ge=0.0)
+    gravity_scale_deg: float = Field(default=5.0, gt=0.0)
+    pose_twist: float = Field(default=0.0, ge=0.0)
 
 
 class OptimiserConfig(StrictModel):

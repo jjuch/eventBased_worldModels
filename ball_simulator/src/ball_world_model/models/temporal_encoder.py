@@ -60,7 +60,11 @@ class RunningStandardiser(nn.Module):
 
 
 class IntervalMotionEncoder(nn.Module):
-    """Encode each pair (F[k], F[k+1], standardised rate) into one motion vector."""
+    """Encode frame pairs (F_a, F_b, standardised rate (F_b - F_a) / gap) into motion vectors.
+
+    ``forward`` pairs consecutive frames (one vector per interval); ``encode_pairs`` takes any
+    pairs, e.g. every context frame with the anchor frame.
+    """
 
     def __init__(self, feature_channels: int, motion_dim: int, momentum: float = 0.01) -> None:
         super().__init__()
@@ -80,15 +84,18 @@ class IntervalMotionEncoder(nn.Module):
             nn.SiLU(),
         )
         
+    def encode_pairs(self, first: Tensor, second: Tensor, gap: Tensor) -> Tensor:
+        """first, second [B, N, C, H, W], gap [B, N] in s -> motion features [B, N, D]."""
+        # Differences of nearly equal values need float32.
+        first, second = first.float(), second.float()
+        rate = self.rate_standardiser((second - first) / gap[..., None, None, None])
+        pairs = torch.cat((first, second, rate), dim=2)
+        batch, count = pairs.shape[:2]
+        return self.network(pairs.flatten(0, 1)).reshape(batch, count, -1)
+
     def forward(self, maps: Tensor, dt: Tensor) -> Tensor:
-        """maps [B, T, C, H, W], dt [B, I] -> motion features [B, I, D]."""
-        maps = maps.float()  # differences of nearly equal values need float32
-        rate = (maps[:, 1:] - maps[:, :-1]) / dt[..., None, None, None]
-        rate = self.rate_standardiser(rate)
-        pairs = torch.cat((maps[:, :-1], maps[:, 1:], rate), dim=2)
-        batch, intervals = pairs.shape[:2]
-        motion = self.network(pairs.flatten(0, 1))
-        return motion.reshape(batch, intervals, -1)
+        """maps [B, T, C, H, W], dt [B, I] -> motion features [B, I, D] per interval."""
+        return self.encode_pairs(maps[:, :-1], maps[:, 1:], dt)
 
 
 class IntervalTemporalMixer(nn.Module):

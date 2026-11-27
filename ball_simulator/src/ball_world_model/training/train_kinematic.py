@@ -17,9 +17,10 @@ from .statistics import StateStatistics, compute_statistics
 
 def _model_config_with_statistics(model_config: dict[str, object], statistics: StateStatistics) -> dict[str, object]:
     result = dict(model_config)
-    for name in STANDARDISED_QUANTITIES:
-        result[f"{name}_mean"] = statistics.means[name].tolist()
-        result[f"{name}_std"] = statistics.stds[name].tolist()
+    result["standardisation"] = {
+        name: {"mean": statistics.means[name].tolist(), "std": statistics.stds[name].tolist()}
+        for name in STANDARDISED_QUANTITIES
+    }
     return result
 
 
@@ -27,7 +28,7 @@ def _report_statistics(statistics: StateStatistics) -> None:
     for name in STANDARDISED_QUANTITIES:
         std = ", ".join(f"{value:.4g}" for value in statistics.stds[name].tolist())
         note = "" if statistics.informative[name] else " <- constant in the data; its R^2 is undefined."
-        print(f"[train_kinematic] {name:<21} std = ({std}){note}")
+        print(f"[train_kinematic] {name:<29} std = ({std}){note}")
 
 
 def train_kinematic(config_path: str | Path) -> Path:

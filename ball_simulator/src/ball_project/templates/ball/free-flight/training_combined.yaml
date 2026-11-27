@@ -7,7 +7,7 @@ model:
   keypoints: 8
   keypoint_dim: 32
   default_dt: 0.01
-  predict_acceleration: true
+  scene_dim: 256
   standardiser_momentum: 0.01
 loss:
   pose: 1.0
@@ -17,6 +17,9 @@ loss:
   rollout_steps: 5
   orientation_scale_deg: 5.0
   kinematic: 0.0
+  gravity: 1.0
+  gravity_scale_deg: 5.0
+  pose_twist: 0.0
 optimiser:
   learning_rate: 0.0003
   weight_decay: 0.05

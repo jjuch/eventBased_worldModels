@@ -7,7 +7,7 @@ import torch
 
 from ball_world_model.models.observer import SE3Observer, SE3ObserverConfig
 from .losses import LossSettings, observer_losses, physical_metrics
-from .targets import future_targets, window_targets
+from .targets import anchor_window_targets
 
 class SE3ObserverModule(L.LightningModule):
     def __init__(
@@ -26,14 +26,9 @@ class SE3ObserverModule(L.LightningModule):
 
     def _step(self, batch: dict[str, torch.Tensor], stage: str) -> torch.Tensor:
         prediction = self.model(batch["context_rgb"], batch["context_time"])
-        targets = window_targets(batch)
-        future = (
-            future_targets(batch, self.loss_settings.rollout_steps)
-            if self.loss_settings.rollout > 0
-            else None
-        )
+        targets = anchor_window_targets(batch, self.loss_settings.rollout_steps)
         total, components = observer_losses(
-            prediction, targets, self.model.scales(), self.loss_settings, future,
+            prediction, targets, self.model.scales(), self.loss_settings
         )
 
         batch_size = len(batch["context_rgb"])
