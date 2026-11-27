@@ -59,6 +59,28 @@ STANDARDISED_QUANTITIES = (
     "gravity",  # per window, anchor frame
 )
 
+class GridAveragePool(nn.Module):
+    """AdaptiveAvgPool2d(grid) as two matrix products: [B, C, H, W] -> [B, C, grid, grid].
+
+    The built-in layer has no deterministic CUDA backward.
+    """
+
+    def __init__(self, grid: int) -> None:
+        super().__init__()
+        self.grid = grid
+
+    def _bin_weights(self, size: int, like: Tensor) -> Tensor:
+        weights = like.new_zeros(self.grid, size)
+        for index in range(self.grid):
+            start, end = index * size // self.grid, -(-(index + 1) * size // self.grid)
+            weights[index, start:end] = 1.0 / (end - start)
+        return weights
+
+    def forward(self, maps: Tensor) -> Tensor:
+        rows = self._bin_weights(maps.shape[-2], maps)
+        columns = self._bin_weights(maps.shape[-1], maps)
+        return rows @ maps @ columns.T
+
 
 @dataclass(frozen=True)
 class SE3ObserverConfig:
@@ -95,7 +117,8 @@ class SceneDescriptor(nn.Module):
             nn.Conv2d(feature_channels, hidden, 3, stride=2, padding=1, bias=False),
             nn.GroupNorm(group_count(hidden), hidden),
             nn.SiLU(),
-            nn.AdaptiveAvgPool2d(grid),
+            #nn.AdaptiveAvgPool2d(grid), # No deterministic backward pass, so GridAveragePool is introduced.
+            GridAveragePool(grid),
             nn.Flatten(),
             nn.Linear(hidden * grid * grid, scene_dim),
             nn.LayerNorm(scene_dim),
