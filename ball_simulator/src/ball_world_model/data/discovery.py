@@ -14,13 +14,10 @@ TRAJECTORY_PATTERN = re.compile(
 ANIMATION_FRAME_PATTERN = re.compile(
     r"^frame_(\d+)\.png$"
 )
-REQUIRED_STATE_FIELDS = (
-    "time",
-    "position",
-    "quaternion_xyzw",
-    "linear_velocity",
-    "angular_velocity",
-)
+# Object and camera states at every frame, world frame; camera rotations in OpenCV axes.
+OBJECT_STATE_FIELDS = ("position", "quaternion_xyzw", "linear_velocity", "angular_velocity")
+CAMERA_STATE_FIELDS = tuple(f"camera_{name}" for name in OBJECT_STATE_FIELDS)
+REQUIRED_STATE_FIELDS = ("time", *OBJECT_STATE_FIELDS, *CAMERA_STATE_FIELDS)
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +33,7 @@ class TrajectoryValidation:
     fps: float
     duration: float
     environment_kind: str
+    camera_mode: str
 
 
 def discover_trajectory_directories(root: Path | str) -> list[Path]:
@@ -119,23 +117,13 @@ def validate_trajectory(
         if missing:
             raise ValueError(f"{states_path} is missing fields: {missing}")
         time = np.asarray(states["time"], dtype=np.float64)
-        position = np.asarray(states["position"])
-        quaternion = np.asarray(states["quaternion_xyzw"])
-        linear_velocity = np.asarray(states["linear_velocity"])
-        angular_velocity = np.asarray(states["angular_velocity"])
+        arrays = {
+            name: np.asarray(states[name]) for name in REQUIRED_STATE_FIELDS if name != "time"
+        }
 
     frame_count = len(rgb_paths)
     expected_shapes = {
-        "position": (frame_count, 3),
-        "quaternion_xyzw": (frame_count, 4),
-        "linear_velocity": (frame_count, 3),
-        "angular_velocity": (frame_count, 3),
-    }
-    arrays = {
-        "position": position,
-        "quaternion_xyzw": quaternion,
-        "linear_velocity": linear_velocity,
-        "angular_velocity": angular_velocity,
+        name: (frame_count, 4 if name.endswith("quaternion_xyzw") else 3) for name in arrays
     }
     if time.shape != (frame_count,):
         raise ValueError(f"time shape {time.shape} does not match {frame_count} frames")
@@ -144,9 +132,9 @@ def validate_trajectory(
             raise ValueError(f"{name} shape {arrays[name].shape}; expected {expected}")
     if frame_count > 1 and not np.all(np.diff(time) > 0.0):
         raise ValueError(f"Timestamps are not strictly increasing in {states_path}")
-    norms = np.linalg.norm(quaternion, axis=1)
-    if not np.allclose(norms, 1.0, atol=1.0e-5):
-        raise ValueError(f"Non-unit quaternions found in {states_path}")
+    for name in ("quaternion_xyzw", "camera_quaternion_xyzw"):
+        if not np.allclose(np.linalg.norm(arrays[name], axis=1), 1.0, atol=1.0e-5):
+            raise ValueError(f"Non-unit {name} found in {states_path}")
 
     with Image.open(rgb_paths[0]) as image:
         width, height = image.size
@@ -174,6 +162,7 @@ def validate_trajectory(
         fps=fps,
         duration=duration,
         environment_kind=environment_kind,
+        camera_mode=str(metadata["camera_mode"]),
     )
 
 

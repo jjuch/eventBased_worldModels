@@ -18,6 +18,7 @@ from .report import write_comparison
 from .runs import create_run
 from .stages.ball import (
     build_manifest,
+    generate_camera_paths,
     generate_trajectories,
     inspect_data, 
     propose_camera, 
@@ -114,6 +115,13 @@ def trajectories_command(
 ) -> None:
     context = discover_project()
     generate_trajectories(context, context.dataset(dataset), dry_run=dry_run)
+
+
+@app.command("camera-paths")
+def camera_paths_command(dataset: DatasetOption = None, dry_run: DryRunOption = False) -> None:
+    """One camera path per trajectory (camera_motion in rendering.yaml)."""
+    context = discover_project()
+    generate_camera_paths(context, context.dataset(dataset), dry_run=dry_run)
 
 
 @app.command("camera")
@@ -308,10 +316,18 @@ def datasets_new_command(
             help="Copy this dataset's configs (and its final camera) instead of the templates.",
         ),
     ] = None,
+    template: Annotated[
+        str | None,
+        typer.Option(
+            "--template",
+            help="Dataset template, e.g. moving-camera; with --from, keeps the reference camera.",
+        ),
+    ] = None,
     description: Annotated[str, typer.Option("--description")] = "",
 ) -> None:
     dataset = create_dataset(
-        discover_project(), name, from_dataset=from_dataset, description=description
+        discover_project(), name, from_dataset=from_dataset, template=template,
+        description=description,
     )
     print(f"[green]Created dataset:[/green] {dataset.root} (camera: {dataset.info().camera})")
     print(f"Next: edit {dataset.configs}, then ball_project prepare --dataset {name}")

@@ -22,6 +22,7 @@ MANIFEST_COLUMNS = (
     "fps",
     "duration",
     "environment_kind",
+    "camera_mode",
     "split",
 )
 

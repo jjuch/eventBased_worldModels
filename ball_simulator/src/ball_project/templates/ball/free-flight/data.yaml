@@ -1,6 +1,7 @@
 # `root` and `manifest_path` are injected from project.yaml into an effective config.
 root: .
 manifest_path: manifest.parquet
+gravity_world: [0.0, 0.0, -9.81]  # injected from trajectories.yaml (simulation.gravity)
 require_success_marker: true
 image:
   width: 256

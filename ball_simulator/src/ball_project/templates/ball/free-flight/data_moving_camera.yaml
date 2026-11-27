@@ -1,0 +1,31 @@
+# `root` and `manifest_path` are injected from project.yaml into an effective config.
+root: .
+manifest_path: manifest.parquet
+gravity_world: [0.0, 0.0, -9.81]  # injected from trajectories.yaml (simulation.gravity)
+require_success_marker: true
+image:
+  width: 384
+  height: 384
+  channels: 3
+  normalization: imagenet
+temporal:
+  rendered_fps: 100.0
+  frame_stride: 1
+  context_frames: 10
+  prediction_frames: 5
+  target_history_frames: 4
+sampling:
+  windows_per_trajectory: 2     # development setting
+  random_start: true
+  seed: 20260801
+splits:
+  train_fraction: 0.80
+  validation_fraction: 0.10
+  test_fraction: 0.10
+  seed: 20260801
+loader:
+  batch_size: 4
+  workers: 8
+  prefetch_factor: 4
+  pin_memory: true
+  persistent_workers: true

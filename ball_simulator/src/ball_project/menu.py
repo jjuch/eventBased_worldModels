@@ -11,6 +11,7 @@ from .report import write_comparison
 from .runs import create_run
 from .stages.ball import (
     build_manifest,
+    generate_camera_paths,
     generate_trajectories,
     inspect_data,
     propose_camera,
@@ -113,31 +114,34 @@ def run_menu(context: ProjectContext) -> None:
         path, rows = write_comparison(context)
         console.print(f"Wrote {rows} evaluations to {path}.")
 
-    actions = {
-        1: ("Generate trajectories (selected dataset)",
+    # Numbered in this order in the menu.
+    actions = dict(enumerate([
+        ("Generate trajectories (selected dataset)",
             lambda: generate_trajectories(context, current_dataset())),
-        2: ("Propose camera (selected dataset)", lambda: propose_camera(context, current_dataset())),
-        3: ("Render all trajectories (selected dataset)", lambda: render(context, current_dataset())),
-        4: ("Build manifest (selected dataset)", lambda: build_manifest(context, current_dataset())),
-        5: ("Inspect data (selected dataset)", lambda: inspect_data(context, current_dataset())),
-        6: ("Prepare selected dataset (all missing data stages)",
+        ("Propose camera (selected dataset)", lambda: propose_camera(context, current_dataset())),
+        ("Generate camera paths (selected dataset)",
+         lambda: generate_camera_paths(context, current_dataset())),
+        ("Render all trajectories (selected dataset)", lambda: render(context, current_dataset())),
+        ("Build manifest (selected dataset)", lambda: build_manifest(context, current_dataset())),
+        ("Inspect data (selected dataset)", lambda: inspect_data(context, current_dataset())),
+        ("Prepare selected dataset (all missing data stages)",
             lambda: prepare_dataset(context, current_dataset())),
-        7: ("Train selected run", lambda: train(context, current_run())),
-        8: ("Evaluate selected run on selected dataset", evaluate),
-        9: ("Write comparison report", report),
-        10: ("Edit trajectory config (selected dataset)",
+        ("Train selected run", lambda: train(context, current_run())),
+        ("Evaluate selected run on selected dataset", evaluate),
+        ("Write comparison report", report),
+        ("Edit trajectory config (selected dataset)",
              lambda: edit_file(current_dataset().trajectories_config)),
-        11: ("Edit rendering config (selected dataset)",
+        ("Edit rendering config (selected dataset)",
              lambda: edit_file(current_dataset().rendering_config)),
-        12: ("Edit data config (selected dataset)", lambda: edit_file(current_dataset().data_config)),
-        13: ("Edit selected run's training config", lambda: edit_file(current_run().training_config)),
-        14: ("Edit base training config (template for new runs)",
+        ("Edit data config (selected dataset)", lambda: edit_file(current_dataset().data_config)),
+        ("Edit selected run's training config", lambda: edit_file(current_run().training_config)),
+        ("Edit base training config (template for new runs)",
              lambda: edit_file(context.resolve(context.manifest.configs.training))),
-        15: ("Create dataset", new_dataset),
-        16: ("Create run", new_run),
-        17: ("Switch dataset", lambda: switch("dataset")),
-        18: ("Switch run", lambda: switch("run")),
-    }
+        ("Create dataset", new_dataset),
+        ("Create run", new_run),
+        ("Switch dataset", lambda: switch("dataset")),
+        ("Switch run", lambda: switch("run")),
+    ], start=1))
 
     while True:
         console.rule("Ball World Model Project")

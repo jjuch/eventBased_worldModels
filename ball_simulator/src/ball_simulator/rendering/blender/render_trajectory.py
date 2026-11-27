@@ -14,6 +14,25 @@ import bpy
 import numpy as np
 from mathutils import Vector
 
+# Area lights, world frame (m). The room enclosure keeps both inside its walls.
+KEY_LIGHT_LOCATION = (4.0, -2.5, 5.0)
+FILL_LIGHT_LOCATION = (-2.0, 1.5, 3.0)
+# Gap between the room walls and the farthest camera position or light, in m.
+ROOM_CLEARANCE = 0.5
+# Base colours of the room walls, keyed by (axis, side). The first three equal the colours of the
+# open free-flight scene (side wall, rear wall, floor), so the base view hardly changes.
+ROOM_COLOURS = {
+    (0, "lower"): (0.27, 0.24, 0.43, 1.0),
+    (1, "upper"): (0.24, 0.31, 0.38, 1.0),
+    (2, "lower"): (0.28, 0.24, 0.20, 1.0),
+    (0, "upper"): (0.22, 0.36, 0.27, 1.0),
+    (1, "lower"): (0.40, 0.30, 0.22, 1.0),
+    (2, "upper"): (0.33, 0.33, 0.35, 1.0),
+}
+# Arrays in the job's state file that are only for Blender, not for the dataset sidecar.
+BLENDER_ONLY_STATES = ("camera_rotation_blender_wxyz",)
+CAMERA_STATES = ("camera_position", "camera_quaternion_xyzw", "camera_linear_velocity", "camera_angular_velocity")
+
 SEMANTIC_INDEX = {
     "background": 0,
     "Ball": 1,
@@ -694,6 +713,7 @@ def environment_signature(job: dict) -> str:
                 job["render"]["wall_thickness"]
             ),
             "camera": job["render"]["camera"],
+            "camera_motion": job["render"]["camera_motion"],
             "lighting": job["render"]["lighting"],
             "environment": job["render"]["environment"],
         },
@@ -835,7 +855,61 @@ def ensure_compatibility_context(context: RendererContext | None, job: dict) -> 
 
 
 
+def room_bounds(job: dict) -> tuple[np.ndarray, np.ndarray]:
+    """Lower and upper corners [3] in m of the room enclosing scene, camera reach and lights.
+
+    Each free-flight reference plane becomes the room wall on its side; the other three walls
+    are placed ROOM_CLEARANCE beyond the farthest camera position (base camera plus
+    camera_motion.maximum_offset) and the lights.
+    """
+    render = job["render"]
+    reach = float(render["camera_motion"]["maximum_offset"]) + ROOM_CLEARANCE
+    camera = np.asarray(render["camera"]["location"], dtype=float)
+    lights = np.asarray((KEY_LIGHT_LOCATION, FILL_LIGHT_LOCATION), dtype=float)
+    lower = np.minimum(camera - reach, lights.min(axis=0) - ROOM_CLEARANCE)
+    upper = np.maximum(camera + reach, lights.max(axis=0) + ROOM_CLEARANCE)
+    for surface in job["environment"]["surfaces"]:
+        normal = np.asarray(surface["normal"], dtype=float)
+        axis = int(np.argmax(np.abs(normal)))
+        if normal[axis] > 0.0:
+            lower[axis] = float(surface["point"][axis])
+        else:
+            upper[axis] = float(surface["point"][axis])
+    if np.any(camera - reach < lower) or np.any(camera + reach > upper):
+        raise ValueError("The camera reach crosses a reference plane; no room can enclose it.")
+    return lower, upper
+
+
+def build_room(job: dict) -> list:
+    """Six textured walls (inner faces at the room bounds), each with its own base colour."""
+    render = job["render"]
+    environment_render = render["environment"]
+    thickness = float(render["wall_thickness"])
+    checker_size = float(environment_render["checker_size"])
+    contrast = float(environment_render["checker_contrast"])
+    lower, upper = room_bounds(job)
+    span = upper - lower + 2.0 * thickness
+    centre = 0.5 * (lower + upper)
+    walls = []
+    for axis in range(3):
+        for side, bound, direction in (("lower", lower, -1.0), ("upper", upper, 1.0)):
+            location = centre.copy()
+            location[axis] = bound[axis] + direction * thickness / 2.0
+            dimensions = span.copy()
+            dimensions[axis] = thickness
+            name = f"room_{'xyz'[axis]}_{side}"
+            material_data = checkerboard_material(
+                f"{name}_checker", ROOM_COLOURS[(axis, side)], contrast=contrast,
+                cell_counts=tuple(max(1.0, value / checker_size) for value in dimensions),
+                roughness=0.75,
+            )
+            walls.append(cube(name, tuple(location), tuple(dimensions), material_data, pass_index=0))
+    return walls
+
+
 def build_environment(job: dict):
+    if job["render"]["environment"]["enclosure"]:
+        return build_room(job)
     render = job["render"]
     environment_render = render["environment"]
     visual_y_extent = float(render["fixed_visual_y_extent"])
@@ -1088,8 +1162,8 @@ def setup_scene(job: dict):
     add_camera(cfg["camera"])
     target = cfg["camera"]["target"]
     lighting = cfg["lighting"]
-    add_area_light("Key", (4.0, -2.5, 5.0), float(lighting["key_energy"]), float(lighting["key_size"]), target)
-    add_area_light("Fill", (-2.0, 1.5, 3.0), float(lighting["fill_energy"]), float(lighting["fill_size"]), target)
+    add_area_light("Key", KEY_LIGHT_LOCATION, float(lighting["key_energy"]), float(lighting["key_size"]), target)
+    add_area_light("Fill", FILL_LIGHT_LOCATION, float(lighting["fill_energy"]), float(lighting["fill_size"]), target)
 
 
 def remove_object_and_mesh(obj) -> None:
@@ -1247,6 +1321,30 @@ def animate_ball(scene, ball, states) -> int:
     return frame_count
 
 
+def animate_camera(camera, states) -> None:
+    """Keyframe the camera pose of every frame (Blender axes, quaternion wxyz, from the job).
+
+    Frames are rendered exactly at the keyframes; linear interpolation only avoids overshoot.
+    """
+    camera.animation_data_clear()
+    camera.rotation_mode = "QUATERNION"
+    for index, (location, quaternion) in enumerate(
+        zip(states["camera_position"], states["camera_rotation_blender_wxyz"], strict=True)
+    ):
+        camera.location = tuple(float(value) for value in location)
+        camera.rotation_quaternion = tuple(float(value) for value in quaternion)
+        camera.keyframe_insert(data_path="location", frame=index + 1, group="Camera")
+        camera.keyframe_insert(data_path="rotation_quaternion", frame=index + 1, group="Camera")
+    action = camera.animation_data.action
+    for data_path, size in (("location", 3), ("rotation_quaternion", 4)):
+        for array_index in range(size):
+            fcurve = action.fcurve_ensure_for_datablock(
+                datablock=camera, data_path=data_path, index=array_index, group_name="Camera",
+            )
+            for keyframe_point in fcurve.keyframe_points:
+                keyframe_point.interpolation = "LINEAR"
+
+
 def render_rgb(
     scene, 
     output_root: Path, 
@@ -1283,6 +1381,8 @@ def render_rgb(
     )
 
     frame_count = animate_ball(scene, ball, states)
+    animate_camera(scene.camera, states)
+    scene.frame_set(1)
 
     configure_rgb_and_segmentation_outputs(
         scene=scene,
@@ -1309,6 +1409,7 @@ def write_sidecar(job: dict, states: dict[str, np.ndarray], output_root: Path):
         "quaternion_xyzw",
         "linear_velocity",
         "angular_velocity",
+        *CAMERA_STATES,
     }
     missing_fields = required_fields.difference(states)
 
@@ -1326,11 +1427,14 @@ def write_sidecar(job: dict, states: dict[str, np.ndarray], output_root: Path):
         **{
             key: np.asarray(value) 
             for key, value in states.items()
+            if key not in BLENDER_ONLY_STATES
         },
     )
     metadata = {
         "schema_version": job["schema_version"],
         "trajectory_id": job["trajectory_id"],
+        "camera_mode": job["camera_mode"],
+        "camera_axes": "opencv: x right, y down, z forward",
         "environment": job["environment"],
         "render": job["render"],
         "frame_count": frame_count,

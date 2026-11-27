@@ -16,17 +16,37 @@ from ball_simulator.trajectories.shapes import (
     write_appearance,
 )
 
+from scipy.spatial.transform import Rotation
+
+from .camera_axes import flip_camera_axes
+from .camera_paths import camera_path_ids, load_camera_path
 from .config import RenderConfig
 from .resampling import resample_states
+
+def _continuous_quaternions(quaternions: np.ndarray) -> np.ndarray:
+    """Flip signs so consecutive quaternions [N, 4] lie in the same hemisphere (q and -q are the
+    same rotation), which keeps keyframe interpolation between frames on the short arc."""
+    result = quaternions.copy()
+    for index in range(1, len(result)):
+        if result[index] @ result[index - 1] < 0.0:
+            result[index] = -result[index]
+    return result
+
 
 def prepare_render_job(
     dataset: str | Path,
     trajectory_id: str | int,
     config: RenderConfig,
     output_directory: str | Path,
+    camera_paths: str | Path,
     job_directory: str | Path | None = None,
 ) -> Path:
-    """Create a dependency-light JSON+NPZ job consumable by Blender's Python."""
+    """Create a dependency-light JSON+NPZ job consumable by Blender's Python.
+
+    Object and camera states are resampled to the frame times. The camera arrays stay in OpenCV
+    axes (the dataset convention); Blender receives its own quaternion in
+    ``camera_rotation_blender_wxyz`` and never converts axes itself.
+    """
     dataset = Path(dataset).resolve()
     output_directory = Path(output_directory).resolve()
     job_directory = Path(job_directory or output_directory / "_jobs").resolve()
@@ -46,6 +66,24 @@ def prepare_render_job(
         config.frame_dt,
     )
     resolved_id = trajectory.trajectory_id
+    camera = load_camera_path(camera_paths, resolved_id)
+    camera_states = resample_states(
+        camera.time,
+        camera.position,
+        camera.quaternion_xyzw,
+        camera.linear_velocity,
+        camera.angular_velocity,
+        config.frame_dt,
+    )
+    if not np.allclose(camera_states["time"], states["time"]):
+        raise ValueError(f"Camera and object time bases differ for trajectory {resolved_id}.")
+    for name in ("position", "quaternion_xyzw", "linear_velocity", "angular_velocity"):
+        states[f"camera_{name}"] = camera_states[name]
+    camera_rotation = Rotation.from_quat(camera_states["quaternion_xyzw"]).as_matrix()
+    blender_rotation = flip_camera_axes(camera_rotation)
+    states["camera_rotation_blender_wxyz"] = _continuous_quaternions(
+        np.roll(Rotation.from_matrix(blender_rotation).as_quat(canonical=False), 1, axis=-1)
+    )
     state_path = job_directory / f"trajectory_{resolved_id}.npz"
     np.savez_compressed(state_path, **states)
 
@@ -68,6 +106,7 @@ def prepare_render_job(
         "schema_version": "1.0",
         "dataset": str(dataset),
         "trajectory_id": resolved_id,
+        "camera_mode": camera.mode,
         "state_npz": str(state_path),
         "output_directory": str(output_directory / f"trajectory_{resolved_id}"),
         "body": render_body_description(
@@ -110,10 +149,17 @@ def prepare_all_render_jobs(
     dataset: str | Path,
     config: RenderConfig,
     output_directory: str | Path,
+    camera_paths: str | Path,
     *,
     resume: bool = False,
 ) -> list[Path]:
-    trajectory_ids = list_trajectory_ids(dataset)
+    """Jobs for every trajectory that has a camera path (trajectories without one were skipped
+    because no camera path kept the object in view)."""
+    with_camera = set(camera_path_ids(camera_paths))
+    trajectory_ids = [
+        trajectory_id for trajectory_id in list_trajectory_ids(dataset)
+        if str(trajectory_id) in with_camera
+    ]
 
     jobs: list[Path] = []
 
@@ -133,6 +179,7 @@ def prepare_all_render_jobs(
                 trajectory_id=trajectory_id,
                 config=config,
                 output_directory=output_directory,
+                camera_paths=camera_paths,
             )
         )
 

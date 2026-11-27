@@ -57,6 +57,10 @@ class DatasetContext:
         return self.root / "reports" / "camera.json"
 
     @property
+    def camera_paths(self) -> Path:
+        return self.root / "camera_paths.h5"
+
+    @property
     def inspection(self) -> Path:
         return self.root / "inspection"
 

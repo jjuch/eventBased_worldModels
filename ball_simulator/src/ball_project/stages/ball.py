@@ -87,6 +87,22 @@ def propose_camera(context: ProjectContext, dataset: DatasetContext, *, dry_run:
     print(f"Previous rendering config archived at: {backup}")
 
 
+def generate_camera_paths(
+    context: ProjectContext, dataset: DatasetContext, *, dry_run: bool = False
+) -> None:
+    """One camera path per trajectory around the (optimised) camera of rendering.yaml."""
+    command = [
+        executable("ball_renderer"),
+        "camera-paths",
+        str(dataset.trajectories),
+        "--config",
+        str(effective_render_config(dataset)),
+        "--output",
+        str(dataset.camera_paths),
+    ]
+    run_command(context, command, stage="camera_paths", scope=dataset, dry_run=dry_run)
+
+
 def render(
     context: ProjectContext,
     dataset: DatasetContext,
@@ -103,6 +119,8 @@ def render(
         str(effective_render_config(dataset)),
         "--output-directory",
         str(dataset.rendered),
+        "--camera-paths",
+        str(dataset.camera_paths),
         "--workers",
         str(runtime.render_workers),
         "--threads-per-blender",

@@ -50,6 +50,48 @@ class EnvironmentRenderConfig(BaseModel):
         "Static visual extension of the floor beyong "
         "each vertical channel wall, in meters."
     ),)
+    # Close the free-flight scene into a textured room around the base camera, so a moving camera
+    # always sees static texture. Needed for camera motion; off for fixed-camera datasets.
+    enclosure: bool = False
+
+CameraMotionMode = Literal["static", "drift", "tracking", "co_moving"]
+
+
+class CameraMotionConfig(BaseModel):
+    """Camera motion per trajectory around the base camera in ``camera`` (see camera_paths.py).
+
+    fractions        share of trajectories per mode; the mode is drawn per trajectory
+    seed             seed of the camera stream, independent of the object trajectories
+    maximum_offset   m, largest distance of the camera from the base camera position (all modes)
+    maximum_speed, maximum_angular_speed
+                     m/s and rad/s, largest drift speeds
+    drift_frequency_hz, tracking_lag_s, co_moving_gain
+                     ranges sampled per trajectory
+    minimum_distance m, closest camera-to-object distance
+    margin_px        smallest gap between the object's image disc and the image border
+    maximum_attempts camera paths drawn per trajectory before the trajectory is skipped
+    """
+
+    fractions: dict[CameraMotionMode, float] = {"static": 1.0}
+    seed: int = 0
+    maximum_offset: float = Field(default=0.4, gt=0.0)
+    maximum_speed: float = Field(default=0.5, gt=0.0)
+    maximum_angular_speed: float = Field(default=0.5, gt=0.0)
+    drift_frequency_hz: tuple[float, float] = (0.5, 3.0)
+    tracking_lag_s: tuple[float, float] = (0.05, 0.10)
+    co_moving_gain: tuple[float, float] = (0.7, 1.0)
+    minimum_distance: float = Field(default=1.0, gt=0.0)
+    margin_px: float = Field(default=8.0, ge=0.0)
+    maximum_attempts: int = Field(default=50, ge=1)
+
+    @model_validator(mode="after")
+    def valid_fractions(self) -> "CameraMotionConfig":
+        if any(value < 0.0 for value in self.fractions.values()):
+            raise ValueError("camera_motion.fractions must be non-negative.")
+        if abs(sum(self.fractions.values()) - 1.0) > 1.0e-9:
+            raise ValueError("camera_motion.fractions must sum to 1.")
+        return self
+
 
 class BallRenderConfig(BaseModel):
     base_color: tuple[float, float, float, float] = (0.78, 0.80, 0.84, 1.0)
@@ -75,6 +117,7 @@ class RenderConfig(BaseModel):
     fixed_visual_y_extent: float = Field(default=4.0, gt=0.0)
     wall_thickness: float = Field(default=0.08, gt=0.0)
     camera: CameraConfig = CameraConfig()
+    camera_motion: CameraMotionConfig = CameraMotionConfig()
     environment: EnvironmentRenderConfig = EnvironmentRenderConfig()
     ball: BallRenderConfig = BallRenderConfig()
     lighting: LightingConfig = LightingConfig()

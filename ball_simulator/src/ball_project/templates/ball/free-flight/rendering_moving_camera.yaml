@@ -1,0 +1,74 @@
+# Moving-camera dataset. The camera block is ball_magnus's optimised camera: it is the base
+# pose around which every camera path moves. `datasets new --template moving-camera --from
+# REFERENCE` replaces it with the reference dataset's camera.
+width: 384
+height: 384
+fps: 100
+engine: BLENDER_EEVEE_NEXT
+samples: 32
+transparent_background: false
+source: observations
+frame_dt: 0.01
+fixed_visual_y_extent: 2.5
+wall_thickness: 0.06
+camera_optimisation_settings:
+  minimum_diameter_px: 35.0
+  target_diameter_px: 50.0
+camera:
+  location:
+  - 0.5281106465909571
+  - -1.8445694420449916
+  - 1.2523118853863284
+  target:
+  - -0.001293469384092305
+  - -0.028266203393453537
+  - 0.6376014160566102
+  focal_length_mm: 42.0
+  sensor_width_mm: 36.0
+environment:
+  representation: opaque
+  near_wall_alpha: 0.0
+  show_near_wall_frame: false
+  frame_thickness: 0.02
+  show_near_wall_grid: false
+  grid_spacing: 0.5
+  grid_thickness: 0.008
+  checkerboard_enabled: true
+  checker_size: 0.25
+  checker_contrast: 0.24
+  floor_margin: 0.1
+  enclosure: true
+camera_motion:
+  fractions: {static: 0.25, drift: 0.25, tracking: 0.25, co_moving: 0.25}
+  seed: 46
+  maximum_offset: 0.4            # m from the base camera position
+  maximum_speed: 0.5             # m/s, drift
+  maximum_angular_speed: 0.5     # rad/s, drift (about 2.6 px per frame at 384 px)
+  drift_frequency_hz: [0.5, 3.0]
+  tracking_lag_s: [0.05, 0.10]
+  co_moving_gain: [0.7, 1.0]
+  minimum_distance: 1.0          # m, camera to object centre
+  margin_px: 8.0
+  maximum_attempts: 50
+ball:
+  base_color:
+  - 0.78
+  - 0.8
+  - 0.84
+  - 1.0
+  roughness: 0.38
+  markers_enabled: true
+  marker_angular_radius_degree: 16.0
+  marker_surface_offset: 0.003
+lighting:
+  world_strength: 0.08
+  key_energy: 1400.0
+  key_size: 2.0
+  fill_energy: 160.0
+  fill_size: 3.0
+outputs:
+  rgb: true
+  depth: false
+  segmentation: false
+  preview_mp4: false
+  keep_exr: false

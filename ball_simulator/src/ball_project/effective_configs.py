@@ -4,6 +4,8 @@ from pathlib import Path
 
 import yaml
 
+from ball_simulator.trajectories.config import ExperimentConfig
+
 from .discovery import ProjectContext, RunContext, DatasetContext
 
 
@@ -27,7 +29,9 @@ def effective_data_config(
     settings_from: Path | None = None,
     destination: Path | None = None,
 ) -> Path:
-    """data.yaml with the dataset's render folder and manifest injected.
+    """data.yaml with the dataset's render folder, manifest and gravity injected.
+
+    Gravity comes from the dataset's trajectories.yaml, the single source of the simulated physics.
 
     ``destination`` is the file to write; by default ``<dataset>/effective/data.yaml``.
     ``settings_from`` takes image, timing and loader settings from another data.yaml (a run's training snapshot), so a run is evaluated on this dataset exactly as it was trained.
@@ -36,6 +40,8 @@ def effective_data_config(
     value = _read(source)
     value["root"] = str(dataset.rendered)
     value["manifest_path"] = str(dataset.manifest)
+    simulation = ExperimentConfig.from_yaml(dataset.trajectories_config).simulation
+    value["gravity_world"] = list(simulation.gravity)
     return _write(destination or dataset.effective / "data.yaml", value)
 
 

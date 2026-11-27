@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader, Dataset
 from ball_world_model.config import DataConfig
 from .manifest import load_manifest
 from .transforms import FrameTransform
-from .discovery import animation_frame_paths
+from .discovery import REQUIRED_STATE_FIELDS, animation_frame_paths
 
 @dataclass(frozen=True, slots=True)
 class WindowIndex:
@@ -140,16 +140,12 @@ class RenderedTrajectoryDataset(Dataset[dict[str, object]]):
         future_rgb = self._load_images(rgb_directory, future_indices)
 
         with np.load(Path(row["states_path"])) as states:
-            data = {name: np.asarray(states[name]) for name in (
-                "time",
-                "position",
-                "quaternion_xyzw",
-                "linear_velocity",
-                "angular_velocity",
-            )}
+            data = {name: np.asarray(states[name]) for name in REQUIRED_STATE_FIELDS}
 
         sample: dict[str, object] = {
             "trajectory_id": str(row["trajectory_id"]).zfill(8),
+            "camera_mode": str(row["camera_mode"]),
+            "gravity_world": torch.as_tensor(self.config.gravity_world, dtype=torch.float32),
             "start_frame": int(start_frame),
             "context_indices": torch.as_tensor(context_indices, dtype=torch.int64),
             "future_indices": torch.as_tensor(future_indices, dtype=torch.int64),

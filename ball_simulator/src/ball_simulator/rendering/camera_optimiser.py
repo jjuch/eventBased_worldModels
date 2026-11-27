@@ -8,6 +8,7 @@ import h5py
 import numpy as np
 import yaml
 
+from .camera_axes import CameraIntrinsics, look_at_opencv, world_to_camera
 from .config import RenderConfig
 
 @dataclass(frozen=True, slots=True)
@@ -42,18 +43,6 @@ def load_position_cloud(dataset: str | Path, max_samples: int = 50_000):
     return position, radius
 
 
-def _basis(location: np.ndarray, target: np.ndarray):
-    forward = target - location
-    forward /= np.linalg.norm(forward)
-    world_up = np.asarray([0.0, 0.0, 1.0])
-    if abs(np.dot(forward, world_up)) > 0.98:
-        world_up = np.asarray([0.0, 1.0, 0.0])
-    right = np.cross(forward, world_up)
-    right /= np.linalg.norm(right)
-    up = np.cross(right, forward)
-    return right, up, forward
-
-
 def project_spheres(
     position: np.ndarray,
     radius: np.ndarray,
@@ -65,16 +54,14 @@ def project_spheres(
     width: int,
     height: int,
 ):
-    right, up, forward = _basis(location, target)
-    relative = position - location
-    depth = relative @ forward
-    focal_pixels_x = width * focal_length_mm / sensor_width_mm
-    sensor_height_mm = sensor_width_mm * height / width
-    focal_pixels_y = height * focal_length_mm / sensor_height_mm
-    u = width / 2.0 + focal_pixels_x * (relative @ right) / depth
-    v = height / 2.0 + focal_pixels_y * (relative @ up) / depth
-    diameter = 2.0 * focal_pixels_x * radius/depth
-    return u, v, diameter, depth
+    """Sphere centres [N, 3] (world, m) -> image column, row, diameter (px) and depth (m)."""
+    rotation = look_at_opencv(location, target)
+    in_camera = world_to_camera(position, location, rotation)
+    intrinsics = CameraIntrinsics(width, height, focal_length_mm, sensor_width_mm)
+    pixels = intrinsics.project(in_camera)
+    depth = in_camera[..., 2]
+    diameter = 2.0 * intrinsics.focal_pixels * radius / depth
+    return pixels[..., 0], pixels[..., 1], diameter, depth
 
 
 def _conditioning(

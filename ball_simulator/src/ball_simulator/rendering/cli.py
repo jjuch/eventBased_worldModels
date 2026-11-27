@@ -9,6 +9,7 @@ from rich.progress import BarColumn, Progress, TaskProgressColumn, TextColumn, T
 import numpy as np
 
 from .config import RenderConfig
+from .camera_paths import write_camera_paths
 from .jobs import prepare_render_job, prepare_all_render_jobs
 from .runner import BlenderRunner
 from .camera_optimiser import optimise_camera, write_optimised_reder_config
@@ -69,6 +70,31 @@ def propose_camera_command(
     print(f"  minimum image margin: {candidate.minimum_margin_px:.1f} px")
     print(f"  projection conditioning: {candidate.conditioning:.5f}")
     
+
+@app.command("camera-paths")
+def camera_paths_command(
+    dataset: Annotated[
+        Path,
+        typer.Argument(exists=True, file_okay=True, dir_okay=False, readable=True),
+    ],
+    config: Annotated[
+        Path,
+        typer.Option("--config", "-c", exists=True, readable=True),
+    ],
+    output: Annotated[
+        Path,
+        typer.Option("--output", "-o"),
+    ],
+) -> None:
+    """One camera path per trajectory (modes and bounds from the config's camera_motion)."""
+    written, skipped = write_camera_paths(dataset, RenderConfig.from_yaml(config), output)
+    print(f"[green]Wrote {written:,} camera paths to[/green] {output.resolve()}")
+    if skipped:
+        print(
+            f"[yellow]Skipped {len(skipped):,} trajectories: no camera path kept the object "
+            f"in view.[/yellow] First ids: {', '.join(skipped[:10])}"
+        )
+
 
 @app.command("render-trajectory")
 def render_trajectory_command(
@@ -143,6 +169,15 @@ def render_trajectory_command(
             ),
         ),
     ] = False,
+    camera_paths: Annotated[
+        Path,
+        typer.Option(
+            "--camera-paths",
+            exists=True,
+            readable=True,
+            help="camera_paths.h5 written by the camera-paths command.",
+        ),
+    ] = ...,
     blender_executable: Annotated[
         Path | None, 
         typer.Option("--blender-executable"),
@@ -170,6 +205,7 @@ def render_trajectory_command(
             dataset=dataset,
             config=render_config,
             output_directory=output_directory,
+            camera_paths=camera_paths,
             resume=resume,
         )
     else:
@@ -178,6 +214,7 @@ def render_trajectory_command(
             trajectory_id=trajectory_id, 
             config=render_config, 
             output_directory=output_directory,
+            camera_paths=camera_paths,
         )
         jobs = [job]
 
@@ -220,4 +257,11 @@ def render_trajectory_command(
             on_complete=lambda _: progress.advance(task),
         )
 
+    failed = [job.stem for job in jobs if not (output_directory / job.stem / "_SUCCESS").is_file()]
+    if failed:
+        print(
+            f"[red]{len(failed):,} of {len(jobs):,} trajectories failed to render[/red] "
+            f"(see {output_directory / '_logs'}). First: {', '.join(failed[:5])}"
+        )
+        raise typer.Exit(code=1)
     print(f"[green]Rendered {len(jobs):,} trajectories.[/green]")

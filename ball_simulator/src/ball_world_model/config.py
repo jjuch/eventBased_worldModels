@@ -65,8 +65,14 @@ class LoaderConfig(BaseModel):
 
 
 class DataConfig(BaseModel):
+    """Rendered dataset and window settings.
+
+    gravity_world  gravity vector [3] in m/s^2, world frame. One constant per dataset, injected
+                   from the dataset's trajectories.yaml by ball_project.
+    """
     root: Path
     manifest_path: Path | None = None
+    gravity_world: tuple[float, float, float]
     image: ImageConfig = ImageConfig()
     temporal: TemporalConfig = TemporalConfig()
     sampling: SamplingConfig = SamplingConfig()

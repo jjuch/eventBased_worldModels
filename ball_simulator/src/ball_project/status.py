@@ -5,6 +5,8 @@ from dataclasses import dataclass
 import h5py
 import yaml
 
+from ball_simulator.rendering.camera_paths import camera_path_ids
+
 from .discovery import ProjectContext, DatasetContext
 
 
@@ -16,6 +18,7 @@ class DatasetStatus:
     camera_mode: str
     trajectories: int | None
     camera_ready: bool
+    camera_paths: int | None
     rendered_complete: int
     manifest_ready: bool
     camera_summary: str | None
@@ -67,6 +70,9 @@ def inspect_dataset(dataset: DatasetContext) -> DatasetStatus:
         camera_mode=info.camera,
         trajectories=_trajectory_count(dataset),
         camera_ready=info.camera == "fixed" or dataset.camera_report.is_file(),
+        camera_paths=(
+            len(camera_path_ids(dataset.camera_paths)) if dataset.camera_paths.is_file() else None
+        ),
         rendered_complete=sum(1 for _ in dataset.rendered.glob("trajectory_*/_SUCCESS")),
         manifest_ready=dataset.manifest.is_file(),
         camera_summary=_camera_summary(dataset),
