@@ -8,7 +8,7 @@ import yaml
 from .discovery import ProjectContext, DatasetContext
 
 
-@datacless(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True)
 class DatasetStatus:
     name: str
     description: str
@@ -18,7 +18,7 @@ class DatasetStatus:
     camera_ready: bool
     rendered_complete: int
     manifest_ready: bool
-    _camera_summary: str | None
+    camera_summary: str | None
 
 
 @dataclass(frozen=True, slots=True)
